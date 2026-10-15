@@ -501,15 +501,7 @@ bool loadCachedBehavior(const char* toolId) {
   return setBehaviorFromJson(jsonStr.c_str());
 }
 
-void loadBehavior(const char* toolId) {
-  Serial.print("Load: "); Serial.println(toolId);
-  if (wifiStationOk && fetchBehavior(toolId)) { Serial.println("OK store"); return; }
-  if (loadCachedBehavior(toolId)) { Serial.println("OK cache"); return; }
-  Serial.println("No behavior"); behaviorLoaded = false;
-}
-
 /* ==========================================================
-   Built-in default behavior JSONs (flash/PROGMEM)
    — contract-conformant: {"slot":".."} refs, structured guards,
      named events / first-match-guard-wins, touch regions
    ========================================================== */
@@ -605,6 +597,28 @@ const char REACTION_JSON[] PROGMEM =
   "{\"stamp\":{\"slot\":\"show_until\"}}"
   "]}]}"
   "]}]}";
+
+/* ==========================================================
+   Behavior loading (needs the PROGMEM arrays above for the built-in fallback)
+   ========================================================== */
+const char* progmemBehavior(const char* toolId) {
+  if (!toolId) return NULL;
+  if (strcmp(toolId, "timer") == 0)         return TIMER_JSON;
+  if (strcmp(toolId, "temp-logger") == 0)   return TEMP_JSON;
+  if (strcmp(toolId, "reaction-game") == 0) return REACTION_JSON;
+  return NULL;
+}
+
+void loadBehavior(const char* toolId) {
+  Serial.print("Load: "); Serial.println(toolId);
+  if (wifiStationOk && fetchBehavior(toolId)) { Serial.println("OK store"); return; }
+  if (loadCachedBehavior(toolId)) { Serial.println("OK cache"); return; }
+  /* Fall back to the compiled-in PROGMEM copy — no filesystem needed. Guarantees the board
+     always has behavior (never blank), even if LittleFS is empty/unformatted. */
+  const char* builtin = progmemBehavior(toolId);
+  if (builtin && setBehaviorFromJson(builtin)) { Serial.println("OK builtin (PROGMEM)"); return; }
+  Serial.println("No behavior"); behaviorLoaded = false;
+}
 
 /* Seed builtins to LittleFS on first boot */
 void seedDefaultBehaviors() {
