@@ -18,81 +18,42 @@
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <SPI.h>
+#include <XPT2046_Touchscreen.h>
 
 /* ==========================================================
    XPT2046 touch — SEPARATE SPI instance (VSPI), independent of the TFT (HSPI).
-   E32R28T/2432S028R: SCLK25 MOSI32 MISO39 CS33 IRQ36 (manufacturer pinout).
-   Uses the same raw sampling protocol as TFT_eSPI's Touch.cpp but on its own bus.
+   This board (2432S028R / E32R28T): SCLK25 MOSI32 MISO39 CS33 IRQ36.
+   Uses the stock XPT2046_Touchscreen library on its own VSPI bus — the SAME
+   proven profile the working firmwares (Bruce / HaleHound / Wireless Wizard)
+   use. Requires USE_HSPI_PORT in build flags so the display owns HSPI and the
+   touch owns VSPI (without it both fight for VSPI and touch never reads).
    ========================================================== */
 SPIClass touchSPI(VSPI);
+XPT2046_Touchscreen touch(33, 36);   // CS, IRQ — same as working profile
 #define TOUCH_SCLK 25
 #define TOUCH_MOSI 32
 #define TOUCH_MISO 39
-#define TOUCH_CS   33
-#define TOUCH_IRQ  36
-#define Z_THRESHOLD 350
-#define TOUCH_FREQ  2500000
 
 void touchBegin() {
-  touchSPI.begin(TOUCH_SCLK, TOUCH_MISO, TOUCH_MOSI, TOUCH_CS);
-  pinMode(TOUCH_CS, OUTPUT);
-  digitalWrite(TOUCH_CS, HIGH);
-  pinMode(TOUCH_IRQ, INPUT);
+  touchSPI.begin(TOUCH_SCLK, TOUCH_MISO, TOUCH_MOSI, 33);
+  touch.begin(touchSPI);
+  touch.setRotation(0);   /* portrait 240x320 — matches the tool definitions */
 }
 
-static uint16_t touchReadZ() {
-  touchSPI.beginTransaction(SPISettings(TOUCH_FREQ, MSBFIRST, SPI_MODE0));
-  digitalWrite(TOUCH_CS, LOW);
-  int16_t tz = 0xFFF;
-  touchSPI.transfer(0xb0);               // start Z1
-  tz += touchSPI.transfer16(0xc0) >> 3;  // read Z1, start Z2
-  tz -= touchSPI.transfer16(0x00) >> 3;  // read Z2
-  digitalWrite(TOUCH_CS, HIGH);
-  touchSPI.endTransaction();
-  if (tz == 4095) tz = 0;
-  return (uint16_t)tz;
-}
-
-static void touchReadRaw(uint16_t *x, uint16_t *y) {
-  touchSPI.beginTransaction(SPISettings(TOUCH_FREQ, MSBFIRST, SPI_MODE0));
-  digitalWrite(TOUCH_CS, LOW);
-  uint16_t tmp;
-  // X (YP sample)
-  touchSPI.transfer(0xd0); touchSPI.transfer(0);
-  touchSPI.transfer(0xd0); touchSPI.transfer(0);
-  touchSPI.transfer(0xd0); touchSPI.transfer(0);
-  tmp = touchSPI.transfer(0);
-  tmp = tmp << 5;
-  tmp |= 0x1f & (touchSPI.transfer(0x90) >> 3);
-  *x = tmp;
-  // Y (XP sample)
-  touchSPI.transfer(0); touchSPI.transfer(0x90);
-  touchSPI.transfer(0); touchSPI.transfer(0x90);
-  touchSPI.transfer(0); touchSPI.transfer(0x90);
-  tmp = touchSPI.transfer(0);
-  tmp = tmp << 5;
-  tmp |= 0x1f & (touchSPI.transfer(0) >> 3);
-  *y = tmp;
-  digitalWrite(TOUCH_CS, HIGH);
-  touchSPI.endTransaction();
-}
-
-/* Debounced, double-sampled touch read. Returns true + screen coords (portrait 240x320) on press. */
+/* Returns true + screen coords (portrait 240x320) on press. Stock lib does the
+   heavy lifting (Z1/Z2 pressure, oversampling, power-down); we map its raw
+   rotation-0 output (0..4095) to the screen. */
 static bool touchReadScreen(uint16_t *sx, uint16_t *sy) {
-  uint16_t x1, y1, x2, y2;
-  uint16_t z1 = touchReadZ();
-  if (z1 <= Z_THRESHOLD) return false;
-  touchReadRaw(&x1, &y1);
-  if (touchReadZ() <= Z_THRESHOLD) return false;
-  delay(2);
-  touchReadRaw(&x2, &y2);
-  if (abs((int)x1 - (int)x2) > 20 || abs((int)y1 - (int)y2) > 20) return false;
-  // raw 0..4095 → screen (rotation 0, portrait 240x320). Rough proportional map —
-  // the full-screen region means any in-bounds tap is valid; fine-tune later if needed.
-  *sx = ((uint32_t)(y1 + y2) / 2) * 240 / 4096;
-  *sy = ((uint32_t)(x1 + x2) / 2) * 320 / 4096;
-  if (*sx >= 240) *sx = 239;
-  if (*sy >= 320) *sy = 319;
+  if (!(touch.tirqTouched() && touch.touched())) return false;
+  TS_Point p = touch.getPoint();
+  if (p.z < 300) return false;
+  /* rotation 0: xraw=4095-y, yraw=x (raw 0..4095) → screen 240 wide / 320 tall */
+  uint32_t rx = (uint32_t)p.x * 240 / 4096;
+  uint32_t ry = (uint32_t)p.y * 320 / 4096;
+  if (rx >= 240) rx = 239;
+  if (ry >= 320) ry = 319;
+  *sx = (uint16_t)rx;
+  *sy = (uint16_t)ry;
   return true;
 }
 
@@ -250,6 +211,7 @@ static String varStr(JsonVariant v) {
 static bool varEq(JsonVariant a, JsonVariant b) {
   a = resolveVar(a); b = resolveVar(b);
   if (a.is<const char*>() || b.is<const char*>()) return varStr(a) == varStr(b);
+  if (a.is<bool>() || b.is<bool>()) return varBool(a) == varBool(b);   /* bools compare as bools — float cast mangles them */
   return varFloat(a) == varFloat(b);
 }
 
@@ -304,7 +266,7 @@ static bool evalGuard(JsonVariant g) {
   const char* op = o["op"];
   if (!op || strcmp(op, "always") == 0) return true;
   JsonVariant a = o["a"], b = o["b"];
-  if      (strcmp(op, "eq") == 0) return varEq(a, b);
+  if (strcmp(op, "eq") == 0) return varEq(a, b);
   else if (strcmp(op, "ne") == 0) return !varEq(a, b);
   else if (strcmp(op, "lt") == 0) return varFloat(a) <  varFloat(b);
   else if (strcmp(op, "le") == 0) return varFloat(a) <= varFloat(b);
@@ -921,11 +883,18 @@ void loop() {
     }
   }
 
-  /* Touch-down → named event via explicit region (edge-detected: one event per press) */
+  /* Touch-down → named event via explicit region (edge-detected: one event per press).
+     Debounce: the stock lib's touched() can flicker during a hold (pressure dips below
+     threshold), which would re-trigger the edge. A 250ms cooldown per physical press
+     keeps it to exactly one toggle. */
   static bool touchWasDown = false;
+  static uint32_t lastTouchEventMs = 0;
   uint16_t tx = 0, ty = 0;
   bool touched = touchReadScreen(&tx, &ty);
-  if (touched && !touchWasDown && behaviorLoaded && behaviorRoot["events"]) {
+  uint32_t tNow = millis();
+  if (touched && !touchWasDown && (tNow - lastTouchEventMs > 250) &&
+      behaviorLoaded && behaviorRoot["events"]) {
+    lastTouchEventMs = tNow;
     for (JsonObject ev : behaviorRoot["events"].as<JsonArray>()) {
       JsonObject region = ev["region"];
       if (!region) continue;

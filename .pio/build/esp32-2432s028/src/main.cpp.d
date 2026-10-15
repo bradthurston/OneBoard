@@ -277,4 +277,5 @@
  /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/mbedtls/port/include/aes_alt.h \
  /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/mbedtls/port/include/aes/esp_aes.h \
  /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/hal/include/hal/aes_types.h \
- /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/mbedtls/mbedtls/include/mbedtls/error.h
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/mbedtls/mbedtls/include/mbedtls/error.h \
+ .pio/libdeps/esp32-2432s028/XPT2046_Touchscreen/XPT2046_Touchscreen.h
