@@ -108,10 +108,23 @@ static uint8_t parseSource(const JsonVariant& v, const JsonArray& stateDef,
 }
 
 // ============================================================
+// Compile-error reporting — sets prog->compile_error and fails the compile
+// ============================================================
+static bool compileFail(VmProgram* prog, const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(prog->compile_error, sizeof(prog->compile_error), fmt, ap);
+  va_end(ap);
+  return false;
+}
+
+// ============================================================
 // Compile a guard JSON object → Guard struct
+// Returns false on a real error (unknown op), sets prog->compile_error.
+// A missing/absent guard is NOT an error — it means "always match".
 // ============================================================
 static bool compileGuard(const JsonArray& rootState, const JsonVariant& gJson,
-                         Guard* out) {
+                         Guard* out, VmProgram* prog) {
   memset(out, 0, sizeof(Guard));
   if (gJson.isNull()) { out->op = G_ALWAYS; return true; }
 
@@ -128,7 +141,9 @@ static bool compileGuard(const JsonArray& rootState, const JsonVariant& gJson,
   else if (strcmp(op, "ge") == 0)           { out->op = G_GE; }
   else if (strcmp(op, "is_true") == 0)      { out->op = G_IS_TRUE; }
   else if (strcmp(op, "elapsed_ge") == 0)   { out->op = G_ELAPSED_GE; }
-  else                                       { out->op = G_ALWAYS; }
+  else {
+    return compileFail(prog, "unknown guard op '%s' (in if/handler guard)", op);
+  }
 
   if (out->op == G_ALWAYS) return true;
   if (out->op == G_IS_TRUE) {
@@ -140,18 +155,20 @@ static bool compileGuard(const JsonArray& rootState, const JsonVariant& gJson,
   return true;
 }
 
-// Forward decl
+// Forward decls
 static bool compileBlock(const JsonArray& rootState, const JsonArray& block,
                          VmProgram* prog, uint8_t* out_start, uint8_t* out_count);
 
 // ============================================================
 // Compile a single verb → instruction(s)
-// Returns number of instructions emitted (0 = skip)
+// Returns number of instructions emitted (>=0), or -1 on a hard error
+// (sets prog->compile_error — the whole compile then fails).
 // ============================================================
 static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
                        VmProgram* prog) {
   uint8_t n = prog->instr_count;
-  if (n >= VM_MAX_INSTRUCTIONS - 4) return 0; // need room for worst case (if block)
+  if (n >= VM_MAX_INSTRUCTIONS - 4)  // need room for worst case (if block)
+    return compileFail(prog, "instruction limit (%d) exceeded", VM_MAX_INSTRUCTIONS) ? -1 : -1;
 
   Instr* instr = &prog->instrs[n];
   memset(instr, 0, sizeof(Instr));
@@ -161,19 +178,19 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     JsonObject p = verb["add"];
     const char* slotName = p["slot"];
     int idx = resolveSlotIndex(rootState, slotName);
-    if (idx < 0) return 0;
+    if (idx < 0) return compileFail(prog, "add: unknown slot '%s'", slotName ? slotName : "(none)") ? -1 : -1;
 
     // Check for noise source: add with noise is compiled as OP_NOISE
     // which does dst += random(lo, hi) in one instruction
     JsonVariant delta = p["delta"];
     if (delta.is<JsonObject>() && delta["noise"].is<JsonObject>()) {
-      JsonObject n = delta["noise"];
+      JsonObject nz = delta["noise"];
       Instr* ni = &prog->instrs[prog->instr_count];
       memset(ni, 0, sizeof(Instr));
       ni->op = OP_NOISE;
       ni->dst = (uint8_t)idx;
-      ni->a_val = (int32_t)(n["lo"].as<float>());
-      ni->b_val = (int32_t)(n["hi"].as<float>());
+      ni->a_val = (int32_t)(nz["lo"].as<float>());
+      ni->b_val = (int32_t)(nz["hi"].as<float>());
       prog->instr_count++;
       return 1;
     }
@@ -191,7 +208,7 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     JsonObject p = verb["sub"];
     const char* slotName = p["slot"];
     int idx = resolveSlotIndex(rootState, slotName);
-    if (idx < 0) return 0;
+    if (idx < 0) return compileFail(prog, "sub: unknown slot '%s'", slotName ? slotName : "(none)") ? -1 : -1;
     instr->op = OP_SUB;
     instr->dst = (uint8_t)idx;
     instr->a_ty = parseSource(p["delta"], rootState, &instr->a_slot,
@@ -205,7 +222,7 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     JsonObject p = verb["set"];
     const char* slotName = p["slot"];
     int idx = resolveSlotIndex(rootState, slotName);
-    if (idx < 0) return 0;
+    if (idx < 0) return compileFail(prog, "set: unknown slot '%s'", slotName ? slotName : "(none)") ? -1 : -1;
     instr->op = OP_SET;
     instr->dst = (uint8_t)idx;
     instr->a_ty = parseSource(p["value"], rootState, &instr->a_slot,
@@ -219,7 +236,7 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     JsonObject p = verb["setf"];
     const char* slotName = p["slot"];
     int idx = resolveSlotIndex(rootState, slotName);
-    if (idx < 0) return 0;
+    if (idx < 0) return compileFail(prog, "setf: unknown slot '%s'", slotName ? slotName : "(none)") ? -1 : -1;
     instr->op = OP_SET;
     instr->dst = (uint8_t)idx;
     instr->a_ty = parseSource(p["value"], rootState, &instr->a_slot,
@@ -233,7 +250,7 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     JsonObject p = verb["toggle"];
     const char* slotName = p["slot"];
     int idx = resolveSlotIndex(rootState, slotName);
-    if (idx < 0) return 0;
+    if (idx < 0) return compileFail(prog, "toggle: unknown slot '%s'", slotName ? slotName : "(none)") ? -1 : -1;
     instr->op = OP_TOGGLE;
     instr->dst = (uint8_t)idx;
     prog->instr_count++;
@@ -245,7 +262,7 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     JsonObject p = verb["stamp"];
     const char* slotName = p["slot"];
     int idx = resolveSlotIndex(rootState, slotName);
-    if (idx < 0) return 0;
+    if (idx < 0) return compileFail(prog, "stamp: unknown slot '%s'", slotName ? slotName : "(none)") ? -1 : -1;
     instr->op = OP_STAMP;
     instr->dst = (uint8_t)idx;
     prog->instr_count++;
@@ -257,7 +274,7 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     JsonObject p = verb["random"];
     const char* slotName = p["slot"];
     int idx = resolveSlotIndex(rootState, slotName);
-    if (idx < 0) return 0;
+    if (idx < 0) return compileFail(prog, "random: unknown slot '%s'", slotName ? slotName : "(none)") ? -1 : -1;
     instr->op = OP_RAND;
     instr->dst = (uint8_t)idx;
     // min -> a_val, max -> b_val (plain literal values)
@@ -272,7 +289,7 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     JsonObject p = verb["now_minus"];
     const char* slotName = p["slot"];
     int idx = resolveSlotIndex(rootState, slotName);
-    if (idx < 0) return 0;
+    if (idx < 0) return compileFail(prog, "now_minus: unknown slot '%s'", slotName ? slotName : "(none)") ? -1 : -1;
     instr->op = OP_NOW_MINUS;
     instr->dst = (uint8_t)idx;
     instr->a_ty = parseSource(p["from"], rootState, &instr->a_slot,
@@ -281,18 +298,19 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     return 1;
   }
 
-  // --- format (op: ms, temp, react) ---
+  // --- format (op: ms, temp, react, int) ---
   if (verb.containsKey("format")) {
     JsonObject p = verb["format"];
     const char* slotName = p["slot"];
     const char* op = p["op"];
     int idx = resolveSlotIndex(rootState, slotName);
-    if (idx < 0 || !op) return 0;
+    if (idx < 0) return compileFail(prog, "format: unknown slot '%s'", slotName ? slotName : "(none)") ? -1 : -1;
+    if (!op) return compileFail(prog, "format: missing 'op'") ? -1 : -1;
     if (strcmp(op, "ms") == 0)    instr->op = OP_FMT_MS;
     else if (strcmp(op, "temp") == 0)  instr->op = OP_FMT_TEMP;
     else if (strcmp(op, "react") == 0) instr->op = OP_FMT_REACT;
     else if (strcmp(op, "int") == 0)   instr->op = OP_FMT_INT;
-    else return 0;
+    else return compileFail(prog, "format: unknown op '%s'", op) ? -1 : -1;
     instr->dst = (uint8_t)idx;
     instr->a_ty = parseSource(p["src"], rootState, &instr->a_slot,
                                &instr->a_val, NULL);
@@ -301,22 +319,31 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
   }
 
   // --- progress ---
+  // dst = (src % max) * px / max — a progress-bar width.
+  // THREE operands, each in its own storage (a=src, b=max, c=px). This must
+  // NOT reuse a slot field across two operands: the old code parsed px into
+  // the same a_slot as src, so a slot-based src became index 255 and the
+  // runtime read out of bounds. Fix: src->A, max->B, px->C.
   if (verb.containsKey("progress")) {
     JsonObject p = verb["progress"];
     const char* slotName = p["slot"];
     int idx = resolveSlotIndex(rootState, slotName);
-    if (idx < 0) return 0;
+    if (idx < 0) return compileFail(prog, "progress: unknown slot '%s'", slotName ? slotName : "(none)") ? -1 : -1;
     instr->op = OP_PROGRESS;
     instr->dst = (uint8_t)idx;
+    // Defaults: max=1, px=220 when the JSON field is absent (parseSource
+    // leaves the value untouched on null, so seed before parsing).
+    instr->b_ty = SRC_LIT; instr->b_slot = 0xFF; instr->b_val = 1;
+    instr->c_ty = SRC_LIT; instr->c_slot = 0xFF; instr->c_val = 220;
+    // src -> operand A
     instr->a_ty = parseSource(p["src"], rootState, &instr->a_slot,
                                &instr->a_val, NULL);
-    // Pack max into b_val, px into a_val
-    int32_t maxVal = 1;
-    parseSource(p["max"], rootState, &instr->b_slot, &maxVal, NULL);
-    instr->b_val = maxVal;
-    int32_t pxVal = 220;
-    parseSource(p["px"], rootState, &instr->a_slot, &pxVal, NULL);
-    instr->a_val = pxVal;
+    // max -> operand B
+    instr->b_ty = parseSource(p["max"], rootState, &instr->b_slot,
+                               &instr->b_val, NULL);
+    // px -> operand C (own storage)
+    instr->c_ty = parseSource(p["px"], rootState, &instr->c_slot,
+                               &instr->c_val, NULL);
     prog->instr_count++;
     return 1;
   }
@@ -325,12 +352,13 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
   if (verb.containsKey("render")) {
     JsonObject p = verb["render"];
     uint8_t ri = prog->render_count;
-    if (ri >= VM_MAX_RENDER) return 0;
+    if (ri >= VM_MAX_RENDER)
+      return compileFail(prog, "render limit (%d) exceeded", VM_MAX_RENDER) ? -1 : -1;
     RenderPrim* rp = &prog->renders[ri];
     memset(rp, 0, sizeof(RenderPrim));
 
     const char* type = p["type"];
-    if (!type) return 0;
+    if (!type) return compileFail(prog, "render: missing 'type'") ? -1 : -1;
     if (strcmp(type, "clear") == 0)          rp->type = R_CLEAR;
     else if (strcmp(type, "text") == 0)      rp->type = R_TEXT;
     else if (strcmp(type, "rect") == 0)      rp->type = R_RECT;
@@ -339,7 +367,7 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     else if (strcmp(type, "circle") == 0)    rp->type = R_CIRCLE;
     else if (strcmp(type, "bar") == 0)       rp->type = R_BAR;
     else if (strcmp(type, "graph") == 0)     rp->type = R_GRAPH;
-    else return 0;
+    else return compileFail(prog, "render: unknown type '%s'", type) ? -1 : -1;
 
     // Colour
     rp->color_slot = 0xFF;   // default: use color_idx (literal), not a slot
@@ -347,6 +375,7 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
       JsonObject c = p["color"];
       int sidx = resolveSlotIndex(rootState, c["slot"]);
       if (sidx >= 0) { rp->color_slot = (uint8_t)sidx; rp->color_idx = 0xFF; }
+      else return compileFail(prog, "render: color slot '%s' unknown", (const char*)c["slot"]) ? -1 : -1;
     } else if (p["color"].is<const char*>()) {
       rp->color_idx = resolveColorIndex(p["color"]);
     } else {
@@ -425,9 +454,10 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
   if (verb.containsKey("if")) {
     JsonObject p = verb["if"];
     uint8_t gi = prog->guard_count;
-    if (gi >= VM_MAX_GUARDS) return 0;
-    if (!compileGuard(rootState, p["guard"], &prog->guards[gi]))
-      return 0;
+    if (gi >= VM_MAX_GUARDS)
+      return compileFail(prog, "guard limit (%d) exceeded", VM_MAX_GUARDS) ? -1 : -1;
+    if (!compileGuard(rootState, p["guard"], &prog->guards[gi], prog))
+      return -1;
     prog->guard_count++;
 
     // Emit OP_IF FIRST (then/else blocks follow it in the stream):
@@ -443,12 +473,14 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
 
     // Compile 'then' block (immediately after OP_IF)
     uint8_t then_start = 0, then_count = 0;
-    compileBlock(rootState, p["then"], prog, &then_start, &then_count);
+    if (!compileBlock(rootState, p["then"], prog, &then_start, &then_count))
+      return -1;
 
     // Compile 'else' block (may be absent)
     uint8_t else_start = 0, else_count = 0;
     if (p["else"].is<JsonArray>())
-      compileBlock(rootState, p["else"], prog, &else_start, &else_count);
+      if (!compileBlock(rootState, p["else"], prog, &else_start, &else_count))
+        return -1;
 
     ii->a_val = then_count; // number of instructions in 'then'
     ii->b_val = else_count; // number of instructions in 'else'
@@ -457,11 +489,15 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     return 1 + then_count + else_count;
   }
 
-  return 0; // unknown verb — skip
+  // Unknown verb — this used to silently skip, which let a tool "load OK"
+  // while missing its behavior entirely. Now it's a hard compile error.
+  const char* k = verb.begin()->key().c_str();
+  return compileFail(prog, "unknown verb '%s'", k ? k : "(none)") ? -1 : -1;
 }
 
 // ============================================================
 // Compile a block (JSON array of verb objects) → instructions
+// Returns false on a hard error (compile_error set).
 // ============================================================
 static bool compileBlock(const JsonArray& rootState, const JsonArray& block,
                          VmProgram* prog, uint8_t* out_start, uint8_t* out_count) {
@@ -470,6 +506,7 @@ static bool compileBlock(const JsonArray& rootState, const JsonArray& block,
   *out_count = 0;
   for (JsonObject verb : block) {
     int n = compileVerb(rootState, verb, prog);
+    if (n < 0) return false;   // hard error — abort the whole compile
     *out_count += n;
   }
   return true;
@@ -483,7 +520,7 @@ bool vmCompile(const JsonObject& root, VmProgram* prog) {
 
   // --- ID ---
   const char* id = root["id"];
-  if (!id) return false;
+  if (!id) return compileFail(prog, "missing 'id'");
   strncpy(prog->id, id, sizeof(prog->id) - 1);
 
   JsonArray stateDef = root["state"];
@@ -552,18 +589,29 @@ bool vmCompile(const JsonObject& root, VmProgram* prog) {
           // Compile guard
           uint8_t gi = prog->guard_count;
           if (gi >= VM_MAX_GUARDS) break;
-          if (!compileGuard(stateDef, h["guard"], &prog->guards[gi]))
-            continue;
+          if (!compileGuard(stateDef, h["guard"], &prog->guards[gi], prog))
+            return false;
           prog->guard_count++;
           prog->events[ei].handlers[hi].guard_idx = gi;
 
           // Compile run block
-          compileBlock(stateDef, h["run"], prog,
-                       &prog->events[ei].handlers[hi].instr_start,
-                       &prog->events[ei].handlers[hi].instr_count);
+          if (!compileBlock(stateDef, h["run"], prog,
+                            &prog->events[ei].handlers[hi].instr_start,
+                            &prog->events[ei].handlers[hi].instr_count))
+            return false;
 
           prog->events[ei].handler_count++;
         }
+      }
+
+      // Touch region — {x,y,w,h} rectangle; only relevant to touch events.
+      JsonObject region = ev["region"];
+      if (region) {
+        prog->events[ei].has_region = true;
+        prog->events[ei].region_x = (int16_t)(region["x"] | (int64_t)0);
+        prog->events[ei].region_y = (int16_t)(region["y"] | (int64_t)0);
+        prog->events[ei].region_w = (int16_t)(region["w"] | (int64_t)240);
+        prog->events[ei].region_h = (int16_t)(region["h"] | (int64_t)320);
       }
       prog->event_count++;
     }
@@ -800,8 +848,8 @@ static int execInstr(VmState* state, const VmProgram* prog,
 
     case OP_PROGRESS: {
       int64_t src = srcInt(state, instr->a_ty, instr->a_slot, instr->a_val);
-      int64_t maxVal = instr->b_val;
-      int64_t pxVal = instr->a_val;
+      int64_t maxVal = srcInt(state, instr->b_ty, instr->b_slot, instr->b_val);
+      int64_t pxVal  = srcInt(state, instr->c_ty, instr->c_slot, instr->c_val);
       if (maxVal <= 0) maxVal = 1;
       int64_t w = (src % maxVal) * pxVal / maxVal;
       state->ival[instr->dst] = w;
@@ -878,12 +926,59 @@ bool vmTick(VmState* state, const VmProgram* prog, unsigned long now) {
 }
 
 // ============================================================
-// Public API: vmDispatch — dispatch a named event (e.g. touch)
+// Public API: vmDispatchTouch — dispatch a touch press at (tx,ty)
+// Iterates ALL touch-type events (no schedule) in order; an event fires only
+// if it has no region, or the press lands inside its region. First event
+// whose guard matches wins. This is how multi-button screens work: give each
+// button its own touch event with a region rectangle.
+// Returns true if any handler ran.
 // ============================================================
-bool vmDispatch(VmState* state, const VmProgram* prog, const char* eventName) {
+bool vmDispatchTouch(VmState* state, const VmProgram* prog, int16_t tx, int16_t ty) {
+  unsigned long now = millis();
+  for (uint8_t ei = 0; ei < prog->event_count; ei++) {
+    const VmEvent* ev = &prog->events[ei];
+    if (ev->interval_ms > 0) continue;   // scheduled event — not touch
+
+    // Region hit-test: only fire when the press lands inside the rectangle
+    // (or the event has no region = full screen).
+    if (ev->has_region) {
+      if (tx < ev->region_x || tx >= ev->region_x + ev->region_w ||
+          ty < ev->region_y || ty >= ev->region_y + ev->region_h) {
+        continue;   // press outside this event's region
+      }
+    }
+
+    // First-match-guard-wins handler dispatch
+    for (uint8_t hi = 0; hi < ev->handler_count; hi++) {
+      const Handler* h = &ev->handlers[hi];
+      const Guard* g = &prog->guards[h->guard_idx];
+      if (!evalGuard(state, g, now)) continue;
+      execRange(state, prog, h->instr_start, h->instr_count, now);
+      return true; // handled
+    }
+  }
+  return false; // no touch event matched the press
+}
+
+// ============================================================
+// Public API: vmDispatch — dispatch a named event (e.g. touch)
+// For touch events with a region, (tx,ty) must be inside it to fire.
+// (Prefer vmDispatchTouch for touch input — it handles multi-region buttons.)
+// ============================================================
+bool vmDispatch(VmState* state, const VmProgram* prog, const char* eventName,
+                int16_t tx, int16_t ty) {
   for (uint8_t ei = 0; ei < prog->event_count; ei++) {
     if (strcmp(prog->events[ei].name, eventName) != 0) continue;
     const VmEvent* ev = &prog->events[ei];
+
+    // Region hit-test: a touch event with a region only fires when the press
+    // lands inside it. No region (or no coords passed) = full screen.
+    if (ev->has_region && tx >= 0 && ty >= 0) {
+      if (tx < ev->region_x || tx >= ev->region_x + ev->region_w ||
+          ty < ev->region_y || ty >= ev->region_y + ev->region_h) {
+        return false;   // press outside this event's region — don't fire
+      }
+    }
 
     unsigned long now = millis();
 

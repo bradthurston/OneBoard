@@ -48,7 +48,6 @@ BOARD = os.environ.get("ONBOARD_BOARD_IP", "").strip()
 STORE = os.environ.get("ONBOARD_STORE_URL", "").strip().rstrip("/")
 ALLOWED = {int(x) for x in os.environ.get("ONBOARD_ALLOWED", "").split(",") if x.strip()}
 
-
 def http_get(url, timeout=8):
     with urllib.request.urlopen(url, timeout=timeout) as resp:
         return resp.read().decode()
@@ -75,8 +74,11 @@ def list_tools():
 
 
 def authorized(update: Update) -> bool:
+    # Fail-closed: with no allowlist configured there is NO legitimate caller,
+    # so nobody is authorized. Startup refuses to run without an allowlist
+    # (see main()) — this is defense-in-depth, not the primary gate.
     if not ALLOWED:
-        return True  # not configured -> allow (single-user box)
+        return False
     return update.effective_user is not None and update.effective_user.id in ALLOWED
 
 
@@ -156,6 +158,11 @@ def main():
         sys.exit(1)
     if not BOARD:
         print("ONBOARD_BOARD_IP not set — cannot start", file=sys.stderr)
+        sys.exit(1)
+    if not ALLOWED:
+        print("ONBOARD_ALLOWED is empty — refusing to start. This bot is owner-", file=sys.stderr)
+        print("only; set ONBOARD_ALLOWED to a comma-separated list of Telegram", file=sys.stderr)
+        print("user ids before running (see the env template).", file=sys.stderr)
         sys.exit(1)
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("help", cmd_help))

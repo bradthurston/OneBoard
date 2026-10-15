@@ -142,6 +142,7 @@ String        storeUrl     = DEFAULT_STORE;
 VmProgram     g_prog;
 VmState       g_state;
 bool          vmInitialized = false;
+String        lastLoadError = "";   // human-readable reason for the last failed load
 
 /* ==========================================================
    NVS config helpers
@@ -180,13 +181,26 @@ const char* progmemBehavior(const char* toolId) {
 bool loadBehaviorFromJson(const char* jsonStr) {
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, jsonStr);
-  if (err) { Serial.print("JSON err: "); Serial.println(err.c_str()); return false; }
+  if (err) {
+    Serial.print("JSON err: "); Serial.println(err.c_str());
+    lastLoadError = "invalid JSON: " + String(err.c_str());
+    return false;
+  }
 
   JsonObject root = doc.as<JsonObject>();
-  if (!root["id"]) { Serial.println("No 'id'"); return false; }
+  if (!root["id"]) {
+    Serial.println("No 'id'");
+    lastLoadError = "behavior has no 'id'";
+    return false;
+  }
 
   // Compile JSON → compact VM instructions
-  if (!vmCompile(root, &g_prog)) { Serial.println("VM compile fail"); return false; }
+  if (!vmCompile(root, &g_prog)) {
+    Serial.print("VM compile fail: ");
+    Serial.println(g_prog.compile_error);
+    lastLoadError = g_prog.compile_error;
+    return false;
+  }
 
   // Initialize runtime state from compiled program
   vmStateInit(&g_state, &g_prog);
@@ -233,14 +247,17 @@ bool loadCachedBehavior(const char* toolId) {
   return loadBehaviorFromJson(jsonStr.c_str());
 }
 
-void loadBehavior(const char* toolId) {
+bool loadBehavior(const char* toolId) {
   Serial.print("Load: "); Serial.println(toolId);
+  lastLoadError = "";
   vmInitialized = false;
-  if (wifiStationOk && fetchBehavior(toolId)) { Serial.println("OK store"); return; }
-  if (loadCachedBehavior(toolId)) { Serial.println("OK cache"); return; }
+  if (wifiStationOk && fetchBehavior(toolId)) { Serial.println("OK store"); return true; }
+  if (loadCachedBehavior(toolId)) { Serial.println("OK cache"); return true; }
   const char* builtin = progmemBehavior(toolId);
-  if (builtin && loadBehaviorFromJson(builtin)) { Serial.println("OK builtin (PROGMEM)"); return; }
+  if (builtin && loadBehaviorFromJson(builtin)) { Serial.println("OK builtin (PROGMEM)"); return true; }
   Serial.println("No behavior");
+  if (lastLoadError == "") lastLoadError = "no behavior source found for '" + String(toolId) + "'";
+  return false;
 }
 
 void seedDefaultBehaviors() {
@@ -363,8 +380,9 @@ void handleRoot() {
         "try{"
           "var r=await fetch('/load?id='+id);"
           "var j=await r.json();"
-          "if(j.ok)document.getElementById('current').innerText='Tool: '+j.tool"
-        "}catch(e){}"
+          "if(j.ok)document.getElementById('current').innerText='Tool: '+j.tool;"
+          "else alert('Load failed: '+(j.error||'unknown reason'));"
+        "}catch(e){alert('Load failed: network error')}"
       "}"
       "async function renderTools(storeUrl){"
         "try{"
@@ -419,9 +437,18 @@ void handleRoot() {
 void handleLoad() {
   if (server.hasArg("id")) {
     String id = server.arg("id");
-    loadBehavior(id.c_str());
-    String json = "{\"ok\":true,\"tool\":\"" + id + "\"}";
-    server.send(200, "application/json", json);
+    bool ok = loadBehavior(id.c_str());
+    if (ok) {
+      String json = "{\"ok\":true,\"tool\":\"" + id + "\"}";
+      server.send(200, "application/json", json);
+    } else {
+      // Report the real reason (compile error, no source, bad JSON) so a
+      // broken tool doesn't look loaded.
+      String msg = lastLoadError;
+      msg.replace("\\", "\\\\"); msg.replace("\"", "\\\"");
+      String json = "{\"ok\":false,\"tool\":\"" + id + "\",\"error\":\"" + msg + "\"}";
+      server.send(200, "application/json", json);
+    }
     return;
   }
   server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing id\"}");
@@ -539,6 +566,9 @@ void handleSchema() {
       "\"state refs as {\\\"slot\\\":\\\"name\\\"}\","
       "\"first-match-guard-wins per event\",\"touch event named touch-down\","
       "\"every screen render set starts with a clear\","
+      "\"touch regions: event-region {x,y,w,h} hit-test, no region = full screen\","
+      "\"renders draw at frame flush (mutate state before render verbs)\","
+      "\"compile errors are fatal and reported by /load\","
       "\"see docs/BEHAVIOR-AUTHORING.md + tools/validate_behavior.py\"]"
     "}";
   server.send(200, "application/json", schema);
@@ -667,10 +697,10 @@ void loop() {
     if (ran) vmRender(&g_state, &g_prog, &tft);
   }
 
-  /* Touch → named event "touch-down" (edge-detected, 250ms cooldown).
-     Touch region matching is done by the behavior author in JSON,
-     but since all current behaviors use full-screen touch-down,
-     we dispatch unconditionally and let handlers' guards filter. */
+  /* Touch → touch events (edge-detected, 250ms cooldown).
+     vmDispatchTouch iterates all touch-type events and fires the first whose
+     region (if any) contains the press — so multi-region button screens work.
+     Behaviors with no region get full-screen touch (every press fires). */
   static bool touchWasDown = false;
   static uint32_t lastTouchEventMs = 0;
   uint16_t tx = 0, ty = 0;
@@ -679,7 +709,7 @@ void loop() {
   if (touched && !touchWasDown && (tNow - lastTouchEventMs > 250)) {
     lastTouchEventMs = tNow;
     if (vmInitialized) {
-      if (vmDispatch(&g_state, &g_prog, "touch-down"))
+      if (vmDispatchTouch(&g_state, &g_prog, (int16_t)tx, (int16_t)ty))
         vmRender(&g_state, &g_prog, &tft);
     }
   }

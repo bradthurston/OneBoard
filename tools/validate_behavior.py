@@ -143,6 +143,58 @@ class Behavior:
         else:
             for verb in h["run"]:
                 self._check_verb(ev_name, verb)
+            self._warn_render_order(ev_name, h["run"])
+
+    # ---------------------------------------------------------------
+    # Finding-5 guard: render primitives draw at FRAME FLUSH using the state
+    # as it is AFTER the whole handler runs, not a snapshot at the render
+    # instruction. So a handler that does "set label=A; render(label);
+    # set label=B" renders B, not A. Warn when a render reads a slot that a
+    # LATER verb in the same block mutates — that's almost always the footgun.
+    def _warn_render_order(self, ev_name, run):
+        # slots a render reads (text src, coords, bar w, graph slot, color)
+        def render_reads(v):
+            p = v.get("render", {})
+            typ = p.get("type")
+            if not isinstance(p, dict) or typ not in RENDER_TYPES:
+                return set()
+            reads = set()
+            for key in ("x", "y", "w", "h", "r"):
+                c = p.get(key)
+                if isinstance(c, dict) and isinstance(c.get("slot"), str):
+                    reads.add(c["slot"])
+            if isinstance(p.get("src"), dict) and isinstance(p["src"].get("slot"), str):
+                reads.add(p["src"]["slot"])
+            if typ == "graph":
+                s = p.get("slot")
+                if isinstance(s, dict) and isinstance(s.get("slot"), str):
+                    reads.add(s["slot"])
+            return reads
+        # slots a verb writes (its destination)
+        def verb_writes(v):
+            for k in ("set", "setf", "add", "sub", "toggle", "stamp",
+                      "now_minus", "random", "format", "progress"):
+                if k in v and isinstance(v[k], dict) and isinstance(v[k].get("slot"), str):
+                    return {v[k]["slot"]}
+            return set()
+
+        for i, verb in enumerate(run):
+            if not isinstance(verb, dict):
+                continue
+            reads = render_reads(verb)
+            if not reads:
+                continue
+            later_writes = set()
+            for later in run[i + 1:]:
+                if isinstance(later, dict):
+                    later_writes |= verb_writes(later)
+            for slot in sorted(reads & later_writes):
+                self.warn(
+                    f"event '{ev_name}': render reads slot '{slot}' but a later verb "
+                    f"in the same handler writes it — renders draw at frame flush, "
+                    f"so this draws the LATER value. Move the render after the write "
+                    f"if you want the new value, or before it for the old one."
+                )
 
     # ---------------------------------------------------------------
     def _check_guard(self, ev_name, g):

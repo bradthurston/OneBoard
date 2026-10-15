@@ -4,6 +4,12 @@ Write behavior definitions as JSON. The board compiles them to bytecode at load
 and becomes the tool — no reflash. Validate before loading:
 `python3 tools/validate_behavior.py your_behavior.json`
 
+> **Load failures are loud, not silent.** The compiler rejects unknown verbs,
+> unknown slots, unknown format/render/guard ops, and limit overflows — a bad
+> behavior does NOT load "ok". `/load` returns `{"ok":false,"error":"<reason>"}`
+> (e.g. `unknown verb 'increment'`, `set: unknown slot 'missing'`), and the web
+> UI alerts it. There is no case where a broken behavior silently loads.
+
 ## Structure
 
 ```json
@@ -45,7 +51,25 @@ every value references one of these slots.
   matches, then stop. Order matters.
 - Guard-less handler = always matches.
 - `schedule` interval for ticking events. A touch event has **no** `schedule`
-  and is named `"touch-down"` (full-screen touch dispatch).
+  and is named `"touch-down"`.
+- **Touch regions (buttons).** A touch event can declare an optional `region`
+  rectangle; the event only fires when the press lands inside it:
+  ```json
+  {"name": "touch-down", "region": {"x": 0, "y": 200, "w": 240, "h": 120},
+   "handlers": [...]}
+  ```
+  No `region` = full screen (every press fires). Use regions to build buttons:
+  multiple touch events, each with its own rectangle, on the same screen.
+
+## Rendering is frame-flush, not instruction-snapshot
+
+`render` verbs do NOT draw immediately. They mark a primitive dirty; the board
+draws all dirty primitives **after the whole handler runs**, reading the state
+as it is then. So inside one handler, **mutate state first, then render** — a
+handler that does `set label=A → render(label) → set label=B` renders B, not A.
+The validator warns when a render reads a slot a later verb in the same handler
+writes (this exact footgun). If you need two different frames, use two handlers
+(e.g. a tick phase machine), not two render calls around a mid-handler write.
 
 ## Guards (structured, never string-eval)
 

@@ -98,7 +98,7 @@ enum RenderType : uint8_t {
 };
 
 // ============================================================
-// Packed instruction — 12 bytes
+// Packed instruction — 16 bytes
 // ============================================================
 struct __attribute__((packed)) Instr {
   uint8_t op;       // VmOp
@@ -109,6 +109,9 @@ struct __attribute__((packed)) Instr {
   uint8_t b_ty;
   uint8_t b_slot;
   int32_t b_val;
+  uint8_t c_ty;     // SRC_* for operand C (progress: px)
+  uint8_t c_slot;
+  int32_t c_val;
 };
 
 // ============================================================
@@ -141,6 +144,10 @@ struct VmEvent {
   int32_t interval_ms;   // -1 = no schedule (touch/trigger-only), >0 = periodic
   uint8_t handler_count;
   Handler handlers[VM_MAX_HANDLERS];
+  // Touch region — if set, the touch event only fires when the press lands
+  // inside this rectangle. All-zero + has_region=false = full screen.
+  bool   has_region;
+  int16_t region_x, region_y, region_w, region_h;
 };
 
 // ============================================================
@@ -195,6 +202,10 @@ struct VmProgram {
   // Shared render primitive pool
   uint8_t render_count;
   RenderPrim renders[VM_MAX_RENDER];
+
+  // Compile error — set when vmCompile() fails; the caller reports this to
+  // the client instead of a bare "ok". Empty string = no error.
+  char compile_error[80];
 };
 
 // ============================================================
@@ -245,8 +256,16 @@ void vmMarkInitialRender(VmState* state, const VmProgram* prog);
 // Returns true if any handler executed (caller should redraw).
 bool vmTick(VmState* state, const VmProgram* prog, unsigned long now);
 
+// Dispatch a touch press at (tx,ty): fires the first touch-type event whose
+// region (if any) contains the point. Handles multi-region button screens.
+// Returns true if any handler ran. Prefer this over vmDispatch for touch.
+bool vmDispatchTouch(VmState* state, const VmProgram* prog, int16_t tx, int16_t ty);
+
 // Dispatch a named event (e.g. "touch-down"). Returns true if handled.
-bool vmDispatch(VmState* state, const VmProgram* prog, const char* eventName);
+// For touch events with a region set, the press at (tx, ty) must fall inside
+// the region for the event to fire. tx/ty are ignored for non-touch events.
+bool vmDispatch(VmState* state, const VmProgram* prog, const char* eventName,
+                int16_t tx = -1, int16_t ty = -1);
 
 // Execute all render primitives against the TFT display.
 // State may be mutated (graph ring buffer updates).
