@@ -92,7 +92,8 @@ what is not broken here.
 - `validate_behavior.py` — schema validator (catches format errors, not
   semantic lies — hardware is the only true gate)
 - `board_view.html` — any-client screen renderer (browser)
-- `oneboard_bot.py` + `oneboard-tg-bot.service` — Telegram control
+- `oneboard_bot.py` — Telegram control (installed as a systemd user service
+  by `install.sh --with-telegram`)
 - `serve.py` — the behavior store (this machine, port 8082)
 
 ---

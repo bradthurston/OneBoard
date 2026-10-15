@@ -202,18 +202,36 @@ via `/store` + `/load`. No reflash.
    python3 -m venv .venv
    .venv/bin/pip install python-telegram-bot
    ```
-4. Install + start the service:
+4. Install + start the service (the installer generates the unit with the
+   correct repo path — don't hand-copy a service file):
+   ```bash
+   ./install.sh --with-telegram
+   ```
+   or, to do it by hand:
    ```bash
    mkdir -p ~/.config/systemd/user
-   cp systemd/oneboard-tg-bot.service ~/.config/systemd/user/
+   cat > ~/.config/systemd/user/oneboard-tg-bot.service <<EOF
+   [Unit]
+   Description=OneBoard Telegram control bot
+   After=network-online.target
+   [Service]
+   Type=simple
+   WorkingDirectory=$PWD
+   EnvironmentFile=$HOME/.hermes/keys/oneboard-telegram.env
+   ExecStart=$PWD/.venv/bin/python $PWD/tools/oneboard_bot.py
+   Restart=on-failure
+   RestartSec=5
+   [Install]
+   WantedBy=default.target
+   EOF
    systemctl --user daemon-reload
    systemctl --user enable --now oneboard-tg-bot
    ```
 5. In Telegram, message your bot: `/status`, `/tools`, `/load dice`, `/schema`, `/help`.
 
-> The `oneboard-tg-bot.service` file has `WorkingDirectory` /
-> `EnvironmentFile` paths written for this repo's original machine — edit them
-> to match your setup before installing.
+> The env file (`oneboard-telegram.env`) must contain `ONBOARD_BOT_TOKEN`,
+> `ONBOARD_BOARD_IP`, `ONBOARD_STORE_URL`, and `ONBOARD_ALLOWED` (your Telegram
+> numeric user id) or the bot refuses to start.
 
 ---
 
