@@ -13,7 +13,7 @@ with generic "blank-canvas" firmware, then "becomes" whatever behavior you give 
 with no reflashing. One board becomes many tools.
 
 Hardware: **CYD (Cheap Yellow Display) ESP32-2432S028** — vanilla variant. ESP32-WROOM-32 CLASSIC
-(not S3). 2.8" ILI9341 TFT (240x320), XPT2046 resistive touch, WiFi/BT/NFC native, ~300KB usable
+(not S3). 2.8" ILI9341 TFT (240x320), XPT2046 resistive touch, WiFi + Bluetooth native, ~300KB usable
 SRAM, 4MB flash. NOTE: vanilla board = NO SubGHz/2.4GHz radio expansion. Two boards owned.
 
 ## Core concept (why it's not Zigbee)
@@ -92,10 +92,33 @@ with no reflash.
 - **A "should we X" architecture question** → be honest about tradeoffs; favor the staged,
   cheap-first approach that's already locked in.
 
-## Current open question for you (if Brad asks)
+## Behavior-definition contract (adopted — GPT's 8-point refinement, locked for Stages 2 & 3)
 
-Stage 2 = behavior-store over WiFi. The natural design question is the **behavior-definition
-JSON schema**: how to represent a "tool" (name, events, actions, render primitives for the
-240x320 TFT, touch inputs) so that (a) Stage 2 can load/test it, and (b) Stage 3's ~20-30 verb
-VM can execute it without being retrofitted. A good schema from you here would de-risk Stage 3.
-If Brad asks, propose a minimal JSON schema with a timer and reaction-game as worked examples.
+The schema this project uses was refined in consultation with a coding consultant. The agreed
+contract (adopted; applies uniformly to Stages 2 and 3 — no redesign between them):
+
+1. **One instruction format for Stages 2 & 3.** Stage 2 executes parsed JSON directly; Stage 3
+   compiles the same JSON to compact instructions at load. No format change later.
+2. **Typed state slots, no dynamic variables.** State is a fixed array of typed slots
+   (`{"name","type","init"}`). The VM never creates variables; everything references state slots.
+3. **Named events, ordered handlers, first-match-guard-wins.** Execution is deterministic: on an
+   event, run the **first** handler whose guard matches, then stop. Not "behavior by name" ad-hoc.
+4. **Straight-line lists, no loops / recursion / expressions / calls.** A behavior block is a
+   linear list of verbs. No `while`, no function calls in data. If you need repetition, model it
+   as state + a scheduled event.
+5. **Declarative rendering.** Render primitives take fixed objects with literal-or-slot values
+   (`{"slot":"name"}` for a state ref, everything else literal). Rendering is a data spec, not code.
+6. **Explicit touch regions emitting a named event on touch-down.** A `touch` region maps an area
+   to an event name; the pause/resume toggle is a touch-down emit, not an ad-hoc `on_touch` hook.
+7. **Bounded scheduled events, named timer IDs, same-ID-replaces.** Timers are named, have
+   explicit bounds, and re-using an ID replaces the prior timer (fits Stage 1's timer demo).
+8. **`{"slot":"name"}` for state refs, guards are structured comparisons — never strings to eval.**
+   No `format_ms(state.elapsed_ms)` style string expressions in data. This is the security/simplicity line.
+
+Two hardware corrections (confirmed by Brad):
+- Display is **240x320** (this file already states it correctly — no 270x320 anywhere).
+- Classic ESP32 has native **WiFi + Bluetooth but NO NFC**. NFC requires an external **PN532**
+  module. The old "WiFi/BT/NFC native" line (line 16) was corrected; if you ever see a claim of
+  native NFC, reject it.
+
+If Brad asks about the schema, refer to this contract — it is the current of record.
