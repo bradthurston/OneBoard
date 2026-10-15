@@ -142,6 +142,12 @@ bool loadBehaviorFromJson(const char* jsonStr) {
   vmStateInit(&g_state, &g_prog);
   vmInitialized = true;
 
+  // Draw the initial screen immediately — a behavior should render on load,
+  // not wait for its first scheduled tick (and static screens shouldn't need
+  // a tick at all). Mark the first matching handler's renders dirty and flush.
+  vmMarkInitialRender(&g_state, &g_prog);
+  vmRender(&g_state, &g_prog, &tft);
+
   const char* id = root["id"];
   if (id) { activeToolId = String(id); saveConfigStr(ACTIVE_KEY, id); }
   return true;
@@ -229,7 +235,7 @@ const char REACTION_JSON[] PROGMEM =
 // PROGMEM JSON arrays above — behavior loading uses them via forward declarations.
 
 const char TAP_COUNTER_JSON[] PROGMEM =
-  "{\"id\":\"tap-counter\",\"name\":\"Tap Counter\",\"layout\":\"fullscreen\",\"state\":[{\"name\":\"count\",\"type\":\"int64\",\"init\":0},{\"name\":\"count_txt\",\"type\":\"string\",\"init\":\"0\"}],\"events\":[{\"name\":\"tick\",\"schedule\":{\"type\":\"interval\",\"ms\":200},\"handlers\":[{\"guard\":{\"op\":\"always\"},\"run\":[{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":60},\"y\":{\"lit\":40},\"src\":{\"lit\":\"Tap Counter\"},\"font\":{\"lit\":2},\"color\":\"yellow\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":60},\"y\":{\"lit\":120},\"src\":{\"slot\":\"count_txt\"},\"font\":{\"lit\":6},\"color\":\"green\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":30},\"y\":{\"lit\":240},\"src\":{\"lit\":\"Tap anywhere to count\"},\"font\":{\"lit\":2},\"color\":\"white\"}}]}]},{\"name\":\"touch-down\",\"handlers\":[{\"run\":[{\"add\":{\"slot\":\"count\",\"delta\":{\"lit\":1}}},{\"format\":{\"slot\":\"count_txt\",\"op\":\"int\",\"src\":{\"slot\":\"count\"}}}]}]}]}";
+  "{\"id\":\"tap-counter\",\"name\":\"Tap Counter\",\"layout\":\"fullscreen\",\"state\":[{\"name\":\"count\",\"type\":\"int64\",\"init\":0},{\"name\":\"count_txt\",\"type\":\"string\",\"init\":\"0\"}],\"events\":[{\"name\":\"touch-down\",\"handlers\":[{\"run\":[{\"add\":{\"slot\":\"count\",\"delta\":{\"lit\":1}}},{\"format\":{\"slot\":\"count_txt\",\"op\":\"int\",\"src\":{\"slot\":\"count\"}}},{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":120},\"y\":{\"lit\":50},\"src\":{\"lit\":\"Tap Counter\"},\"font\":{\"lit\":2},\"color\":\"yellow\",\"center\":true}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":120},\"y\":{\"lit\":120},\"src\":{\"slot\":\"count_txt\"},\"font\":{\"lit\":6},\"color\":\"green\",\"center\":true}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":120},\"y\":{\"lit\":240},\"src\":{\"lit\":\"Tap to count\"},\"font\":{\"lit\":2},\"color\":\"white\",\"center\":true}}]}]}]}";
 
 /* ==========================================================
    WiFi helpers

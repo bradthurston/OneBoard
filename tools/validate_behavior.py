@@ -34,7 +34,7 @@ COORD_MAX = {"x": 240, "y": 320, "w": 240, "h": 320, "r": 240}
 # Render types → fields they accept (only these are read by vmRender/compile)
 RENDER_FIELDS = {
     "clear": ["color"],
-    "text": ["x", "y", "src", "font", "color"],
+    "text": ["x", "y", "src", "font", "color", "center"],
     "rect": ["x", "y", "w", "h", "color"],
     "fillrect": ["x", "y", "w", "h", "color"],
     "line": ["x", "y", "w", "h", "color"],          # x,y = p1; w,h = p2

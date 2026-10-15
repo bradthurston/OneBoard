@@ -74,9 +74,10 @@ darkgray grey gray`.
 
 - `clear` → `{"type":"clear","color":"black"}` (repaint whole screen; first verb
   of each screen's render set)
-- `text` → `{"type":"text","x","y","src","font","color"}`
+- `text` → `{"type":"text","x","y","src","font","color","center"?}`
   - `src` = `{"lit":"...text..."}` or `{"slot":"string_slot"}`
   - `font` 1-7 (`{"lit":2}` normal, `{"lit":6}` big)
+  - `center: true` = x is the horizontal centre (text is centred on screen)
 - `rect` / `fillrect` → `{"x","y","w","h","color"}`
 - `line` → `{"x","y","w","h","color"}` (x,y = p1; w,h = p2)
 - `circle` → `{"x","y","r","color"}`

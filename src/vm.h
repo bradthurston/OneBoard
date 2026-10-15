@@ -154,6 +154,7 @@ struct __attribute__((packed)) RenderPrim {
   uint8_t x_slot, y_slot, w_slot, h_slot;  // 0xFF = use default above
   uint8_t src_slot;       // text source slot (0xFF = use text_literal)
   uint8_t font;
+  uint8_t center;         // text: center horizontally around x (MC_DATUM)
   char text[VM_STR_LEN];  // inline text when src_slot==0xFF
 };
 
@@ -230,6 +231,14 @@ bool vmCompile(const JsonObject& root, VmProgram* prog);
 
 // Initialize runtime state from a compiled program (sets initial values)
 void vmStateInit(VmState* state, const VmProgram* prog);
+
+// Mark the render primitives of the "initial screen" dirty — the renders from
+// the first-matching handler of each event, evaluated against initial state.
+// Used after load so a behavior displays immediately without waiting for its
+// first tick (and without needing a tick for static screens). Call vmRender()
+// right after. Multi-phase behaviors get their correct first screen, not a
+// garble of every phase.
+void vmMarkInitialRender(VmState* state, const VmProgram* prog);
 
 // Check scheduled events and execute if due. Call from loop().
 // Returns true if any handler executed (caller should redraw).

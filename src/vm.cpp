@@ -396,6 +396,9 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     if (rp->font < 1) rp->font = 2;
     if (rp->font > 7) rp->font = 7;
 
+    // Center flag — text: x becomes the horizontal centre
+    rp->center = (p["center"] | false) ? 1 : 0;
+
     prog->render_count++;
     instr->op = OP_RENDER;
     instr->dst = ri; // render primitive index
@@ -572,6 +575,32 @@ void vmStateInit(VmState* state, const VmProgram* prog) {
   }
   state->slot_count = prog->slot_count;
   // event_last already zeroed by memset
+}
+
+// ============================================================
+// vmMarkInitialRender — mark the first screen's renders dirty
+// ============================================================
+static bool evalGuard(const VmState* state, const Guard* g, unsigned long now);
+
+void vmMarkInitialRender(VmState* state, const VmProgram* prog) {
+  state->render_dirty = 0;
+  // Evaluate against the initial state; stamps are 0 so elapsed_ge is false.
+  const unsigned long now = 0;
+  for (uint8_t ei = 0; ei < prog->event_count; ei++) {
+    const VmEvent* ev = &prog->events[ei];
+    for (uint8_t hi = 0; hi < ev->handler_count; hi++) {
+      const Handler* h = &ev->handlers[hi];
+      const Guard* g = &prog->guards[h->guard_idx];
+      if (!evalGuard(state, g, now)) continue;
+      // First match wins — mark this handler's render instructions dirty
+      uint8_t end = h->instr_start + h->instr_count;
+      for (uint8_t pc = h->instr_start; pc < end; pc++) {
+        if (prog->instrs[pc].op == OP_RENDER)
+          state->render_dirty |= (1u << prog->instrs[pc].dst);
+      }
+      break;
+    }
+  }
 }
 
 // ============================================================
@@ -887,7 +916,14 @@ void vmRender(VmState* state, const VmProgram* prog, TFT_eSPI* tft) {
         if (f < 1) f = 2;
         if (f > 7) f = 7;
         tft->setTextColor(color, TFT_BLACK);
-        tft->drawString(text ? text : "", x, y, f);
+        if (rp->center) {
+          // x is the horizontal centre; MC_DATUM anchors centre of text
+          tft->setTextDatum(MC_DATUM);
+          tft->drawString(text ? text : "", x, y, f);
+          tft->setTextDatum(TL_DATUM);  // restore default
+        } else {
+          tft->drawString(text ? text : "", x, y, f);
+        }
         break;
       }
 
