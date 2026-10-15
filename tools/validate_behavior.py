@@ -351,6 +351,18 @@ class Behavior:
                 self.err(f"event '{ev_name}': render.text missing 'src'")
             else:
                 self._check_value(p["src"], f"event '{ev_name}' render.text.src")
+                # Footgun: the render path reads ONLY string storage (sval[]),
+                # which is written by `format` / string slots — never by add/set
+                # on int/float/bool. Rendering an int slot directly draws blank.
+                src = p["src"]
+                if isinstance(src, dict) and "slot" in src:
+                    slot_name = src["slot"]
+                    if slot_name in self.slots and self.slots[slot_name] != "string":
+                        self.warn(f"event '{ev_name}': render.text.src points at "
+                                  f"non-string slot '{slot_name}' ({self.slots[slot_name]}) — "
+                                  f"it will render blank. Format it into a string slot first "
+                                  f"(format op: {{'slot':'X_txt','op':'int','src':{{'slot':'{slot_name}'}}}}) "
+                                  f"and render that.")
         # graph slot (graph only)
         if typ == "graph":
             if "slot" not in p:

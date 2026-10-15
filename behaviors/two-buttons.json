@@ -2,24 +2,45 @@
   "id": "two-buttons",
   "name": "Two Buttons",
   "state": [
-    {"name": "pressed", "type": "string", "init": "NONE"},
     {"name": "a_count", "type": "int64", "init": 0},
-    {"name": "b_count", "type": "int64", "init": 0}
+    {"name": "a_txt", "type": "string", "init": "0"},
+    {"name": "b_count", "type": "int64", "init": 0},
+    {"name": "b_txt", "type": "string", "init": "0"}
   ],
   "events": [
-    {"name": "touch-down", "region": {"x": 0, "y": 0, "w": 120, "h": 320},
-     "handlers": [{"run": [
-       {"add": {"slot": "a_count", "delta": {"lit": 1}}},
-       {"render": {"type": "clear", "color": "black"}},
-       {"render": {"type": "text", "x": {"lit": 60}, "y": {"lit": 100}, "src": {"lit": "LEFT BUTTON"}, "font": {"lit": 2}, "color": "green", "center": true}},
-       {"render": {"type": "text", "x": {"lit": 60}, "y": {"lit": 140}, "src": {"slot": "a_count"}, "font": {"lit": 6}, "color": "green", "center": true}}
-     ]}]},
-    {"name": "touch-right", "region": {"x": 120, "y": 0, "w": 120, "h": 320},
-     "handlers": [{"run": [
-       {"add": {"slot": "b_count", "delta": {"lit": 1}}},
-       {"render": {"type": "clear", "color": "black"}},
-       {"render": {"type": "text", "x": {"lit": 180}, "y": {"lit": 100}, "src": {"lit": "RIGHT BUTTON"}, "font": {"lit": 2}, "color": "yellow", "center": true}},
-       {"render": {"type": "text", "x": {"lit": 180}, "y": {"lit": 140}, "src": {"slot": "b_count"}, "font": {"lit": 6}, "color": "yellow", "center": true}}
-     ]}]}
+    {
+      "name": "touch-left",
+      "region": {"x": 0, "y": 0, "w": 120, "h": 320},
+      "handlers": [{"run": [
+        {"add": {"slot": "a_count", "delta": {"lit": 1}}},
+        {"format": {"slot": "a_txt", "op": "int", "src": {"slot": "a_count"}}},
+        {"render": {"type": "clear", "color": "black"}},
+        {"render": {"type": "fillrect", "x": {"lit": 5}, "y": {"lit": 40}, "w": {"lit": 110}, "h": {"lit": 240}, "color": "navy"}},
+        {"render": {"type": "rect", "x": {"lit": 5}, "y": {"lit": 40}, "w": {"lit": 110}, "h": {"lit": 240}, "color": "white"}},
+        {"render": {"type": "text", "x": {"lit": 60}, "y": {"lit": 100}, "src": {"lit": "LEFT"}, "font": {"lit": 2}, "color": "white", "center": true}},
+        {"render": {"type": "text", "x": {"lit": 60}, "y": {"lit": 190}, "src": {"slot": "a_txt"}, "font": {"lit": 6}, "color": "green", "center": true}},
+        {"render": {"type": "fillrect", "x": {"lit": 125}, "y": {"lit": 40}, "w": {"lit": 110}, "h": {"lit": 240}, "color": "navy"}},
+        {"render": {"type": "rect", "x": {"lit": 125}, "y": {"lit": 40}, "w": {"lit": 110}, "h": {"lit": 240}, "color": "white"}},
+        {"render": {"type": "text", "x": {"lit": 180}, "y": {"lit": 100}, "src": {"lit": "RIGHT"}, "font": {"lit": 2}, "color": "white", "center": true}},
+        {"render": {"type": "text", "x": {"lit": 180}, "y": {"lit": 190}, "src": {"slot": "b_txt"}, "font": {"lit": 6}, "color": "yellow", "center": true}}
+      ]}]
+    },
+    {
+      "name": "touch-right",
+      "region": {"x": 120, "y": 0, "w": 120, "h": 320},
+      "handlers": [{"run": [
+        {"add": {"slot": "b_count", "delta": {"lit": 1}}},
+        {"format": {"slot": "b_txt", "op": "int", "src": {"slot": "b_count"}}},
+        {"render": {"type": "clear", "color": "black"}},
+        {"render": {"type": "fillrect", "x": {"lit": 5}, "y": {"lit": 40}, "w": {"lit": 110}, "h": {"lit": 240}, "color": "navy"}},
+        {"render": {"type": "rect", "x": {"lit": 5}, "y": {"lit": 40}, "w": {"lit": 110}, "h": {"lit": 240}, "color": "white"}},
+        {"render": {"type": "text", "x": {"lit": 60}, "y": {"lit": 100}, "src": {"lit": "LEFT"}, "font": {"lit": 2}, "color": "white", "center": true}},
+        {"render": {"type": "text", "x": {"lit": 60}, "y": {"lit": 190}, "src": {"slot": "a_txt"}, "font": {"lit": 6}, "color": "green", "center": true}},
+        {"render": {"type": "fillrect", "x": {"lit": 125}, "y": {"lit": 40}, "w": {"lit": 110}, "h": {"lit": 240}, "color": "navy"}},
+        {"render": {"type": "rect", "x": {"lit": 125}, "y": {"lit": 40}, "w": {"lit": 110}, "h": {"lit": 240}, "color": "white"}},
+        {"render": {"type": "text", "x": {"lit": 180}, "y": {"lit": 100}, "src": {"lit": "RIGHT"}, "font": {"lit": 2}, "color": "white", "center": true}},
+        {"render": {"type": "text", "x": {"lit": 180}, "y": {"lit": 190}, "src": {"slot": "b_txt"}, "font": {"lit": 6}, "color": "yellow", "center": true}}
+      ]}]
+    }
   ]
 }

@@ -194,15 +194,19 @@ bool loadBehaviorFromJson(const char* jsonStr) {
     return false;
   }
 
-  // Compile JSON → compact VM instructions
-  if (!vmCompile(root, &g_prog)) {
+  // Compile into a TEMP program first — a failed compile must NOT clobber
+  // the currently-running behavior (which would blank the screen and kill
+  // touch). Only swap the new program in on success.
+  VmProgram newProg;
+  if (!vmCompile(root, &newProg)) {
     Serial.print("VM compile fail: ");
-    Serial.println(g_prog.compile_error);
-    lastLoadError = g_prog.compile_error;
-    return false;
+    Serial.println(newProg.compile_error);
+    lastLoadError = newProg.compile_error;
+    return false;   // g_prog / g_state / vmInitialized untouched — old tool keeps running
   }
 
-  // Initialize runtime state from compiled program
+  // Success — commit the new program
+  g_prog = newProg;
   vmStateInit(&g_state, &g_prog);
   vmInitialized = true;
 
@@ -250,7 +254,10 @@ bool loadCachedBehavior(const char* toolId) {
 bool loadBehavior(const char* toolId) {
   Serial.print("Load: "); Serial.println(toolId);
   lastLoadError = "";
-  vmInitialized = false;
+  // NOTE: do NOT set vmInitialized=false here. A failed load must leave the
+  // currently-running behavior alive (loadBehaviorFromJson compiles into a
+  // temp program and only commits on success). Setting it false early would
+  // blank the screen + kill touch on any bad load.
   if (wifiStationOk && fetchBehavior(toolId)) { Serial.println("OK store"); return true; }
   if (loadCachedBehavior(toolId)) { Serial.println("OK cache"); return true; }
   const char* builtin = progmemBehavior(toolId);
