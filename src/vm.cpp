@@ -276,6 +276,7 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     if (strcmp(op, "ms") == 0)    instr->op = OP_FMT_MS;
     else if (strcmp(op, "temp") == 0)  instr->op = OP_FMT_TEMP;
     else if (strcmp(op, "react") == 0) instr->op = OP_FMT_REACT;
+    else if (strcmp(op, "int") == 0)   instr->op = OP_FMT_INT;
     else return 0;
     instr->dst = (uint8_t)idx;
     instr->a_ty = parseSource(p["src"], rootState, &instr->a_slot,
@@ -728,6 +729,14 @@ static int execInstr(VmState* state, const VmProgram* prog,
       int64_t ms = srcInt(state, instr->a_ty, instr->a_slot, instr->a_val);
       char b[16];
       snprintf(b, sizeof(b), "%lld ms", ms);
+      strncpy(state->sval[instr->dst], b, VM_STR_LEN - 1);
+      return 1;
+    }
+
+    case OP_FMT_INT: {
+      int64_t v = srcInt(state, instr->a_ty, instr->a_slot, instr->a_val);
+      char b[16];
+      snprintf(b, sizeof(b), "%lld", v);
       strncpy(state->sval[instr->dst], b, VM_STR_LEN - 1);
       return 1;
     }

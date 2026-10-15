@@ -116,12 +116,14 @@ void saveConfigStr(const char* key, const char* value) {
 extern const char TIMER_JSON[] PROGMEM;
 extern const char TEMP_JSON[] PROGMEM;
 extern const char REACTION_JSON[] PROGMEM;
+extern const char TAP_COUNTER_JSON[] PROGMEM;
 
 const char* progmemBehavior(const char* toolId) {
   if (!toolId) return NULL;
   if (strcmp(toolId, "timer") == 0)         return TIMER_JSON;
   if (strcmp(toolId, "temp-logger") == 0)   return TEMP_JSON;
   if (strcmp(toolId, "reaction-game") == 0) return REACTION_JSON;
+  if (strcmp(toolId, "tap-counter") == 0)   return TAP_COUNTER_JSON;
   return NULL;
 }
 
@@ -186,9 +188,9 @@ void loadBehavior(const char* toolId) {
 }
 
 void seedDefaultBehaviors() {
-  const char* ids[3] = {"timer", "temp-logger", "reaction-game"};
-  const char* js[3]  = {TIMER_JSON, TEMP_JSON, REACTION_JSON};
-  for (int i = 0; i < 3; i++) {
+  const char* ids[4] = {"timer", "temp-logger", "reaction-game", "tap-counter"};
+  const char* js[4]  = {TIMER_JSON, TEMP_JSON, REACTION_JSON, TAP_COUNTER_JSON};
+  for (int i = 0; i < 4; i++) {
     String path = String(BEHAVIOR_DIR) + String(ids[i]) + ".json";
     if (!LittleFS.exists(path.c_str())) {
       File f = LittleFS.open(path.c_str(), "w");
@@ -225,6 +227,9 @@ const char REACTION_JSON[] PROGMEM =
   "{\"id\":\"reaction-game\",\"name\":\"Reaction Game\",\"layout\":\"fullscreen\",\"state\":[{\"name\":\"phase\",\"type\":\"int64\",\"init\":0},{\"name\":\"wait_start\",\"type\":\"int64\",\"init\":0},{\"name\":\"go_at\",\"type\":\"int64\",\"init\":0},{\"name\":\"delay_ms\",\"type\":\"int64\",\"init\":3000},{\"name\":\"touch_ms\",\"type\":\"int64\",\"init\":0},{\"name\":\"show_until\",\"type\":\"int64\",\"init\":0},{\"name\":\"result_txt\",\"type\":\"string\",\"init\":\"00:00\"}],\"events\":[{\"name\":\"tick\",\"schedule\":{\"type\":\"interval\",\"ms\":100},\"handlers\":[{\"guard\":{\"op\":\"eq\",\"a\":{\"slot\":\"phase\"},\"b\":{\"lit\":0}},\"run\":[{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":70},\"y\":{\"lit\":40},\"src\":{\"lit\":\"Reaction Game\"},\"font\":{\"lit\":2},\"color\":\"yellow\"}},{\"render\":{\"type\":\"circle\",\"x\":{\"lit\":120},\"y\":{\"lit\":140},\"r\":{\"lit\":50},\"color\":\"green\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":65},\"y\":{\"lit\":200},\"src\":{\"lit\":\"READY...\"},\"font\":{\"lit\":2},\"color\":\"white\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":30},\"y\":{\"lit\":240},\"src\":{\"lit\":\"(wait for GO)\"},\"font\":{\"lit\":2},\"color\":\"darkgrey\"}},{\"stamp\":{\"slot\":\"wait_start\"}},{\"set\":{\"slot\":\"phase\",\"value\":{\"lit\":1}}}]},{\"guard\":{\"op\":\"eq\",\"a\":{\"slot\":\"phase\"},\"b\":{\"lit\":1}},\"run\":[{\"if\":{\"guard\":{\"op\":\"elapsed_ge\",\"a\":{\"slot\":\"wait_start\"},\"b\":{\"slot\":\"delay_ms\"}},\"then\":[{\"set\":{\"slot\":\"phase\",\"value\":{\"lit\":2}}},{\"stamp\":{\"slot\":\"go_at\"}},{\"set\":{\"slot\":\"show_until\",\"value\":{\"lit\":0}}},{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":70},\"y\":{\"lit\":40},\"src\":{\"lit\":\"Reaction Game\"},\"font\":{\"lit\":2},\"color\":\"yellow\"}},{\"render\":{\"type\":\"circle\",\"x\":{\"lit\":120},\"y\":{\"lit\":140},\"r\":{\"lit\":50},\"color\":\"red\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":75},\"y\":{\"lit\":210},\"src\":{\"lit\":\"TAP!\"},\"font\":{\"lit\":2},\"color\":\"white\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":30},\"y\":{\"lit\":240},\"src\":{\"lit\":\"Touch the screen!\"},\"font\":{\"lit\":2},\"color\":\"white\"}}]}}]},{\"guard\":{\"op\":\"eq\",\"a\":{\"slot\":\"phase\"},\"b\":{\"lit\":2}},\"run\":[{\"if\":{\"guard\":{\"op\":\"elapsed_ge\",\"a\":{\"slot\":\"show_until\"},\"b\":{\"lit\":3000}},\"then\":[{\"set\":{\"slot\":\"phase\",\"value\":{\"lit\":0}}}]}}]}]},{\"name\":\"touch-down\",\"region\":{\"x\":0,\"y\":0,\"w\":240,\"h\":320},\"handlers\":[{\"guard\":{\"op\":\"eq\",\"a\":{\"slot\":\"phase\"},\"b\":{\"lit\":2}},\"run\":[{\"now_minus\":{\"slot\":\"touch_ms\",\"from\":{\"slot\":\"go_at\"}}},{\"format\":{\"slot\":\"result_txt\",\"op\":\"react\",\"src\":{\"slot\":\"touch_ms\"}}},{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":70},\"y\":{\"lit\":40},\"src\":{\"lit\":\"Reaction Game\"},\"font\":{\"lit\":2},\"color\":\"yellow\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":40},\"y\":{\"lit\":110},\"src\":{\"slot\":\"result_txt\"},\"font\":{\"lit\":6},\"color\":\"green\"}},{\"stamp\":{\"slot\":\"show_until\"}}]}]}]}";
 
 // PROGMEM JSON arrays above — behavior loading uses them via forward declarations.
+
+const char TAP_COUNTER_JSON[] PROGMEM =
+  "{\"id\":\"tap-counter\",\"name\":\"Tap Counter\",\"layout\":\"fullscreen\",\"state\":[{\"name\":\"count\",\"type\":\"int64\",\"init\":0},{\"name\":\"count_txt\",\"type\":\"string\",\"init\":\"0\"}],\"events\":[{\"name\":\"tick\",\"schedule\":{\"type\":\"interval\",\"ms\":200},\"handlers\":[{\"guard\":{\"op\":\"always\"},\"run\":[{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":60},\"y\":{\"lit\":40},\"src\":{\"lit\":\"Tap Counter\"},\"font\":{\"lit\":2},\"color\":\"yellow\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":60},\"y\":{\"lit\":120},\"src\":{\"slot\":\"count_txt\"},\"font\":{\"lit\":6},\"color\":\"green\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":30},\"y\":{\"lit\":240},\"src\":{\"lit\":\"Tap anywhere to count\"},\"font\":{\"lit\":2},\"color\":\"white\"}}]}]},{\"name\":\"touch-down\",\"handlers\":[{\"run\":[{\"add\":{\"slot\":\"count\",\"delta\":{\"lit\":1}}},{\"format\":{\"slot\":\"count_txt\",\"op\":\"int\",\"src\":{\"slot\":\"count\"}}}]}]}]}";
 
 /* ==========================================================
    WiFi helpers
@@ -278,6 +283,7 @@ void handleRoot() {
     "<button id='btn-timer' onclick='loadTool(\"timer\")'>&#9201; Timer</button>"
     "<button id='btn-temp-logger' onclick='loadTool(\"temp-logger\")'>&#127777; Temp Logger</button>"
     "<button id='btn-reaction-game' onclick='loadTool(\"reaction-game\")'>&#9889; Reaction Game</button>"
+    "<button id='btn-tap-counter' onclick='loadTool(\"tap-counter\")'>&#128073; Tap Counter</button>"
     "<div style='margin-top:18px;border-top:1px solid #444;padding-top:12px'>"
       "<div style='font-size:0.9em;color:#9cf;margin-bottom:6px'>WiFi (join your home network)</div>"
       "<input id='wifiSsid' type='text' style='width:100%;max-width:280px;padding:8px;background:#222;color:#fff;border:1px solid #555'"
@@ -378,6 +384,36 @@ void handleStatus() {
   server.send(200, "application/json", json);
 }
 
+/* ==========================================================
+   /schema — self-description: the VM vocabulary an LLM needs
+   to author a valid behavior definition for this board.
+   ========================================================== */
+void handleSchema() {
+  const char* schema = "{"
+    "\"board\":\"CYD ESP32-2432S028\",\"display\":\"240x320\","
+    "\"slots\":{\"types\":[\"int64\",\"float\",\"bool\",\"string\"],\"max\":12},"
+    "\"verbs\":[\"add\",\"sub\",\"set\",\"setf\",\"toggle\",\"stamp\","
+      "\"now_minus\",\"format\",\"progress\",\"render\",\"if\"],"
+    "\"guards\":[\"eq\",\"ne\",\"lt\",\"le\",\"gt\",\"ge\",\"is_true\","
+      "\"elapsed_ge\",\"always\"],"
+    "\"render_types\":[\"clear\",\"text\",\"rect\",\"fillrect\",\"line\","
+      "\"circle\",\"bar\",\"graph\"],"
+    "\"format_ops\":[\"ms\",\"temp\",\"react\",\"int\"],"
+    "\"colors\":[\"black\",\"white\",\"red\",\"green\",\"blue\",\"yellow\","
+      "\"cyan\",\"magenta\",\"orange\",\"navy\",\"darkgrey\",\"darkgray\","
+      "\"grey\",\"gray\"],"
+    "\"fonts\":[1,2,3,4,5,6,7],"
+    "\"limits\":{\"events\":6,\"handlers_per_event\":6,\"slots\":12,"
+      "\"renders\":20,\"instructions\":80,\"if\":\"forward-only\"},"
+    "\"conventions\":[\"literal values as {\\\"lit\\\":N}\","
+      "\"state refs as {\\\"slot\\\":\\\"name\\\"}\","
+      "\"first-match-guard-wins per event\",\"touch event named touch-down\","
+      "\"every screen render set starts with a clear\","
+      "\"see docs/BEHAVIOR-AUTHORING.md + tools/validate_behavior.py\"]"
+    "}";
+  server.send(200, "application/json", schema);
+}
+
 void handleStore() {
   if (server.hasArg("url")) {
     storeUrl = server.arg("url");
@@ -428,6 +464,7 @@ void setup() {
   server.on("/",        handleRoot);
   server.on("/load",    handleLoad);
   server.on("/status",  handleStatus);
+  server.on("/schema",  handleSchema);
   server.on("/store",   handleStore);
   server.on("/wifi",    handleWifi);
   server.onNotFound(handleNotFound);

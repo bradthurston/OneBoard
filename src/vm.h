@@ -60,6 +60,7 @@ enum VmOp : uint8_t {
   OP_FMT_MS,     // dst = format_ms(a) e.g. "01:23"
   OP_FMT_TEMP,   // dst = format_temp(a) e.g. "72.5 F"
   OP_FMT_REACT,  // dst = format_react(a) e.g. "342 ms"
+  OP_FMT_INT,    // dst = format_int(a) e.g. "42"
 
   // --- Progress ---
   OP_PROGRESS,   // dst = (a % b_lit) * c_lit / b_lit  (px=max, max=total)

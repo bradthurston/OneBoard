@@ -1,0 +1,37 @@
+{
+  "id": "tap-counter",
+  "name": "Tap Counter",
+  "layout": "fullscreen",
+  "state": [
+    {"name": "count",     "type": "int64",  "init": 0},
+    {"name": "count_txt", "type": "string", "init": "0"}
+  ],
+  "events": [
+    {
+      "name": "tick",
+      "schedule": {"type": "interval", "ms": 200},
+      "handlers": [
+        {
+          "guard": {"op": "always"},
+          "run": [
+            {"render": {"type": "clear", "color": "black"}},
+            {"render": {"type": "text", "x": {"lit": 60}, "y": {"lit": 40}, "src": {"lit": "Tap Counter"}, "font": {"lit": 2}, "color": "yellow"}},
+            {"render": {"type": "text", "x": {"lit": 60}, "y": {"lit": 120}, "src": {"slot": "count_txt"}, "font": {"lit": 6}, "color": "green"}},
+            {"render": {"type": "text", "x": {"lit": 30}, "y": {"lit": 240}, "src": {"lit": "Tap anywhere to count"}, "font": {"lit": 2}, "color": "white"}}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "touch-down",
+      "handlers": [
+        {
+          "run": [
+            {"add": {"slot": "count", "delta": {"lit": 1}}},
+            {"format": {"slot": "count_txt", "op": "int", "src": {"slot": "count"}}}
+          ]
+        }
+      ]
+    }
+  ]
+}
