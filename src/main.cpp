@@ -18,6 +18,45 @@
 #include "vm.h"  // Stage 3 compiled VM
 
 /* ==========================================================
+   Configuration — board variant. Everything board-specific is overridable
+   via build_flags so the same firmware serves the common CYD family. The
+   verified default is the ESP32-2432S028R (HaleHound). See VARIANTS.md for
+   the pin table + sources.
+   ========================================================== */
+#ifndef TFT_BL
+#define TFT_BL          21      /* S028: 21 | S024: 27 | S032: 21 or 27 */
+#endif
+
+/* Touch bus topology (this is the big fork in the CYD family):
+   0 = separate SPI bus (S028R verified): touch on its own VSPI, pins below.
+   1 = shared with the display bus (S024 / some S032): touch CS on the same
+       MISO/MOSI/SCLK as the TFT; the XPT2046 talks on the display's bus.
+   NOTE: mode 1 is built from vendor/community schematics but NOT hardware-
+   verified here — the S028R bench board is separate-bus only. Test on real
+   hardware before trusting it. */
+#ifndef TOUCH_SHARED_BUS
+#define TOUCH_SHARED_BUS    0
+#endif
+#ifndef TOUCH_CS
+#define TOUCH_CS            33
+#endif
+#ifndef TOUCH_IRQ
+#define TOUCH_IRQ           36      /* S028 separate-bus IRQ */
+#endif
+#ifndef TOUCH_SCLK
+#define TOUCH_SCLK          25      /* S028 separate-bus clock */
+#endif
+#ifndef TOUCH_MOSI
+#define TOUCH_MOSI          32      /* S028 separate-bus MOSI */
+#endif
+#ifndef TOUCH_MISO
+#define TOUCH_MISO          39      /* S028 separate-bus MISO */
+#endif
+
+#define SOFT_AP_SSID    "OneBoard-Stage3"
+#define SOFT_AP_PSK     ""
+
+/* ==========================================================
    XPT2046 touch — SEPARATE SPI instance (VSPI), independent of the TFT (HSPI).
    This board (2432S028R / E32R28T): SCLK25 MOSI32 MISO39 CS33 IRQ36.
    Uses the stock XPT2046_Touchscreen library on its own VSPI bus — the SAME
@@ -26,14 +65,26 @@
    touch owns VSPI (without it both fight for VSPI and touch never reads).
    ========================================================== */
 SPIClass touchSPI(VSPI);
-XPT2046_Touchscreen touch(33, 36);   // CS, IRQ — same as working profile
-#define TOUCH_SCLK 25
-#define TOUCH_MOSI 32
-#define TOUCH_MISO 39
+XPT2046_Touchscreen touch(TOUCH_CS, TOUCH_IRQ);   // CS, IRQ
+
+/* Declared early because touchBegin() (shared-bus mode) needs the display's
+   SPI instance. Initialized in setup(). */
+TFT_eSPI tft = TFT_eSPI();
 
 void touchBegin() {
-  touchSPI.begin(TOUCH_SCLK, TOUCH_MISO, TOUCH_MOSI, 33);
-  touch.begin(touchSPI);
+  if (TOUCH_SHARED_BUS) {
+    /* Touch shares the display's SPI (same MISO/MOSI/SCLK as the TFT) —
+       S024 / some S032. We hand the display SPI instance to the XPT2046
+       instead of a private VSPI bus. */
+    touch.begin(tft.getSPIinstance());
+  } else {
+    /* S028R (verified): touch on its own VSPI bus, independent of the TFT's
+       HSPI. Requires USE_HSPI_PORT in build flags so the display owns HSPI
+       and the touch owns VSPI (without it both fight for VSPI and touch
+       never reads). */
+    touchSPI.begin(TOUCH_SCLK, TOUCH_MISO, TOUCH_MOSI, TOUCH_CS);
+    touch.begin(touchSPI);
+  }
   touch.setRotation(0);   /* portrait 240x320 — matches the tool definitions */
 }
 
@@ -57,9 +108,6 @@ static bool touchReadScreen(uint16_t *sx, uint16_t *sy) {
 /* ==========================================================
    Configuration
    ========================================================== */
-#define TFT_BL          21
-#define SOFT_AP_SSID    "OneBoard-Stage3"
-#define SOFT_AP_PSK     ""
 
 /* NVS namespaces/keys */
 #define CFG_NS          "obm_cfg"
@@ -81,7 +129,6 @@ static bool touchReadScreen(uint16_t *sx, uint16_t *sy) {
 /* ==========================================================
    Globals
    ========================================================== */
-TFT_eSPI      tft = TFT_eSPI();
 WebServer     server(80);
 DNSServer     dnsServer;
 Preferences   prefs;

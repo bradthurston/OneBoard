@@ -43,6 +43,11 @@ self-description: a web page, a Telegram bot, or an LLM.
 
 `platformio.ini` carries the full pin map and all TFT/touch build flags.
 
+> **Which boards work?** The 2432S028R (bench board) is hardware-verified. The
+> common 2432S024 and 2432S032 variants have ready-made envs built from vendor
+> schematics — see **[VARIANTS.md](VARIANTS.md)** for the full pin table,
+> sources, and which configs still need a real-board test.
+
 ### The CYD pin problem (why the config matters)
 The CYD is notorious for white-screen / broken-touch if the TFT and touch
 share a SPI bus or the wrong port is used. This repo's `platformio.ini` is the

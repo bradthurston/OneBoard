@@ -59,6 +59,12 @@ Build and flash:
 pio run -t upload --upload-port /dev/ttyUSB0     # adjust port for your OS
 ```
 
+> **Which board do you have?** The default env is the 2.8" 2432S028R. If your
+> board is a 2432S024 (2.4") or 2432S032 (3.2"), pick the matching env first:
+> `pio run -e esp32-2432s024 -t upload` (or `-e esp32-2432s032-ili9341` /
+> `-e esp32-2432s032-st7789`). Full pin table + verification status:
+> **[VARIANTS.md](VARIANTS.md)**.
+
 Watch it boot (optional, 115200 baud):
 ```bash
 pio run -t monitor
