@@ -66,7 +66,7 @@
           "guard": {"op": "eq", "a": {"slot": "phase"}, "b": {"lit": 2}},
           "run": [
             {"now_minus": {"slot": "touch_ms", "from": {"slot": "go_at"}}},
-            {"format": {"slot": "result_txt", "op": "ms", "src": {"slot": "touch_ms"}}},
+            {"format": {"slot": "result_txt", "op": "react", "src": {"slot": "touch_ms"}}},
             {"render": {"type": "clear", "color": "black"}},
             {"render": {"type": "text", "x": {"lit": 70}, "y": {"lit": 40}, "src": {"lit": "Reaction Game"}, "font": {"lit": 2}, "color": "yellow"}},
             {"render": {"type": "text", "x": {"lit": 40}, "y": {"lit": 110}, "src": {"slot": "result_txt"}, "font": {"lit": 6}, "color": "green"}},

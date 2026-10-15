@@ -327,15 +327,17 @@ void renderPrimitive(const char* type, JsonObject p) {
   }
 }
 
-/* graph — temperature rolling line graph (temp-logger) */
+/* graph — temperature rolling line graph (temp-logger).
+   FIFO ring: write at `head`, then draw oldest→newest starting at (head-n). */
 void renderGraph(JsonObject p) {
 #define GRAPH_SIZE 100
   static float hist[GRAPH_SIZE];
   static int   hCnt = 0;
+  static int   head = 0;                 /* next write slot == oldest after wrap */
   float currentTemp = varFloat(p["slot"]);
-  int64_t sIdx = stateRoot["sample_idx"] | (int64_t)0;
+  hist[head] = currentTemp;
+  head = (head + 1) % GRAPH_SIZE;
   if (hCnt < GRAPH_SIZE) hCnt++;
-  hist[sIdx % GRAPH_SIZE] = currentTemp;
   int graphTop = 100, graphBot = 280;
   tft.drawRect(10, graphTop, 220, graphBot - graphTop, TFT_DARKGREY);
   int n = hCnt;
@@ -343,9 +345,10 @@ void renderGraph(JsonObject p) {
     int drawW = 220 / (n - 1);
     if (drawW < 1) drawW = 1;
     if (drawW > 4) drawW = 4;
+    int start = (head - n + GRAPH_SIZE) % GRAPH_SIZE;   /* oldest sample */
     for (int i = 0; i < n - 1; i++) {
-      int idx0 = (sIdx + i) % GRAPH_SIZE;
-      int idx1 = (sIdx + i + 1) % GRAPH_SIZE;
+      int idx0 = (start + i) % GRAPH_SIZE;
+      int idx1 = (start + i + 1) % GRAPH_SIZE;
       float v0 = hist[idx0], v1 = hist[idx1];
       int y0 = graphBot - ((v0 - 60.0f) / 30.0f) * (graphBot - graphTop);
       int y1 = graphBot - ((v1 - 60.0f) / 30.0f) * (graphBot - graphTop);
@@ -447,7 +450,7 @@ void execVerb(JsonObject verb) {
     return;
   }
 
-  /* format: {"format":{"slot":"x","op":"ms"|"temp","src":<value>}} */
+  /* format: {"format":{"slot":"x","op":"ms"|"temp"|"react","src":<value>}} */
   if (verb.containsKey("format")) {
     JsonObject p = verb["format"];
     const char* name = p["slot"];
@@ -456,6 +459,10 @@ void execVerb(JsonObject verb) {
       if (strcmp(op, "ms") == 0) {
         int64_t ms = varInt(p["src"]);
         char b[12]; snprintf(b, sizeof(b), "%02lld:%02lld", ms / 60000, (ms % 60000) / 1000);
+        stateRoot[name] = b;
+      } else if (strcmp(op, "react") == 0) {
+        int64_t ms = varInt(p["src"]);
+        char b[16]; snprintf(b, sizeof(b), "%lld ms", ms);
         stateRoot[name] = b;
       } else if (strcmp(op, "temp") == 0) {
         char b[16]; snprintf(b, sizeof(b), "%.1f F", varFloat(p["src"]));
@@ -588,75 +595,10 @@ const char TIMER_JSON[] PROGMEM =
   "]}]}";
 
 const char TEMP_JSON[] PROGMEM =
-  "{\"id\":\"temp-logger\",\"name\":\"Temp Logger\",\"layout\":\"fullscreen\","
-  "\"state\":[{\"name\":\"temp\",\"type\":\"float\",\"init\":72.0},"
-  "{\"name\":\"last_tick\",\"type\":\"int64\",\"init\":0},"
-  "{\"name\":\"sample_idx\",\"type\":\"int64\",\"init\":0},"
-  "{\"name\":\"sample_cnt\",\"type\":\"int64\",\"init\":0},"
-  "{\"name\":\"temp_txt\",\"type\":\"string\",\"init\":\"72.0 F\"}],"
-  "\"events\":["
-  "{\"name\":\"tick\",\"schedule\":{\"type\":\"interval\",\"ms\":250},\"handlers\":["
-  "{\"guard\":{\"op\":\"always\"},\"run\":["
-  "{\"stamp\":{\"slot\":\"last_tick\"}},"
-  "{\"add\":{\"slot\":\"temp\",\"delta\":{\"noise\":{\"lo\":-2.0,\"hi\":2.0}}}},"
-  "{\"if\":{\"guard\":{\"op\":\"lt\",\"a\":{\"slot\":\"temp\"},\"b\":{\"lit\":60}},\"then\":[{\"setf\":{\"slot\":\"temp\",\"value\":{\"lit\":60}}}]}},"
-  "{\"if\":{\"guard\":{\"op\":\"gt\",\"a\":{\"slot\":\"temp\"},\"b\":{\"lit\":90}},\"then\":[{\"setf\":{\"slot\":\"temp\",\"value\":{\"lit\":90}}}]}},"
-  "{\"format\":{\"slot\":\"temp_txt\",\"op\":\"temp\",\"src\":{\"slot\":\"temp\"}}},"
-  "{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},"
-  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":80},\"y\":{\"lit\":40},\"src\":{\"lit\":\"Temp Logger\"},\"font\":{\"lit\":2},\"color\":\"yellow\"}},"
-  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":70},\"y\":{\"lit\":70},\"src\":{\"slot\":\"temp_txt\"},\"font\":{\"lit\":4},\"color\":\"cyan\"}},"
-  "{\"render\":{\"type\":\"rect\",\"x\":{\"lit\":10},\"y\":{\"lit\":100},\"w\":{\"lit\":220},\"h\":{\"lit\":180},\"color\":\"darkgrey\"}},"
-  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":215},\"y\":{\"lit\":100},\"src\":{\"lit\":\"90F\"},\"font\":{\"lit\":1},\"color\":\"white\"}},"
-  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":215},\"y\":{\"lit\":270},\"src\":{\"lit\":\"60F\"},\"font\":{\"lit\":1},\"color\":\"white\"}},"
-  "{\"render\":{\"type\":\"graph\",\"slot\":{\"slot\":\"temp\"}}},"
-  "{\"add\":{\"slot\":\"sample_idx\",\"delta\":{\"lit\":1}}},"
-  "{\"if\":{\"guard\":{\"op\":\"lt\",\"a\":{\"slot\":\"sample_cnt\"},\"b\":{\"lit\":100}},\"then\":[{\"add\":{\"slot\":\"sample_cnt\",\"delta\":{\"lit\":1}}}]}}"
-  "]}]]}";
+  "{\"id\":\"temp-logger\",\"name\":\"Temp Logger\",\"layout\":\"fullscreen\",\"state\":[{\"name\":\"temp\",\"type\":\"float\",\"init\":72.0},{\"name\":\"last_tick\",\"type\":\"int64\",\"init\":0},{\"name\":\"sample_idx\",\"type\":\"int64\",\"init\":0},{\"name\":\"sample_cnt\",\"type\":\"int64\",\"init\":0},{\"name\":\"temp_txt\",\"type\":\"string\",\"init\":\"72.0 F\"}],\"events\":[{\"name\":\"tick\",\"schedule\":{\"type\":\"interval\",\"ms\":250},\"handlers\":[{\"guard\":{\"op\":\"always\"},\"run\":[{\"stamp\":{\"slot\":\"last_tick\"}},{\"add\":{\"slot\":\"temp\",\"delta\":{\"noise\":{\"lo\":-2.0,\"hi\":2.0}}}},{\"if\":{\"guard\":{\"op\":\"lt\",\"a\":{\"slot\":\"temp\"},\"b\":{\"lit\":60}},\"then\":[{\"setf\":{\"slot\":\"temp\",\"value\":{\"lit\":60}}}]}},{\"if\":{\"guard\":{\"op\":\"gt\",\"a\":{\"slot\":\"temp\"},\"b\":{\"lit\":90}},\"then\":[{\"setf\":{\"slot\":\"temp\",\"value\":{\"lit\":90}}}]}},{\"format\":{\"slot\":\"temp_txt\",\"op\":\"temp\",\"src\":{\"slot\":\"temp\"}}},{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":80},\"y\":{\"lit\":40},\"src\":{\"lit\":\"Temp Logger\"},\"font\":{\"lit\":2},\"color\":\"yellow\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":70},\"y\":{\"lit\":70},\"src\":{\"slot\":\"temp_txt\"},\"font\":{\"lit\":4},\"color\":\"cyan\"}},{\"render\":{\"type\":\"rect\",\"x\":{\"lit\":10},\"y\":{\"lit\":100},\"w\":{\"lit\":220},\"h\":{\"lit\":180},\"color\":\"darkgrey\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":215},\"y\":{\"lit\":100},\"src\":{\"lit\":\"90F\"},\"font\":{\"lit\":1},\"color\":\"white\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":215},\"y\":{\"lit\":270},\"src\":{\"lit\":\"60F\"},\"font\":{\"lit\":1},\"color\":\"white\"}},{\"render\":{\"type\":\"graph\",\"slot\":{\"slot\":\"temp\"}}},{\"add\":{\"slot\":\"sample_idx\",\"delta\":{\"lit\":1}}},{\"if\":{\"guard\":{\"op\":\"lt\",\"a\":{\"slot\":\"sample_cnt\"},\"b\":{\"lit\":100}},\"then\":[{\"add\":{\"slot\":\"sample_cnt\",\"delta\":{\"lit\":1}}}]}}]}]}]}";
 
 const char REACTION_JSON[] PROGMEM =
-  "{\"id\":\"reaction-game\",\"name\":\"Reaction Game\",\"layout\":\"fullscreen\","
-  "\"state\":[{\"name\":\"phase\",\"type\":\"int64\",\"init\":0},"
-  "{\"name\":\"wait_start\",\"type\":\"int64\",\"init\":0},"
-  "{\"name\":\"go_at\",\"type\":\"int64\",\"init\":0},"
-  "{\"name\":\"delay_ms\",\"type\":\"int64\",\"init\":3000},"
-  "{\"name\":\"touch_ms\",\"type\":\"int64\",\"init\":0},"
-  "{\"name\":\"show_until\",\"type\":\"int64\",\"init\":0},"
-  "{\"name\":\"result_txt\",\"type\":\"string\",\"init\":\"00:00\"}],"
-  "\"events\":["
-  "{\"name\":\"tick\",\"schedule\":{\"type\":\"interval\",\"ms\":100},\"handlers\":["
-  "{\"guard\":{\"op\":\"eq\",\"a\":{\"slot\":\"phase\"},\"b\":{\"lit\":0}},\"run\":["
-  "{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},"
-  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":70},\"y\":{\"lit\":40},\"src\":{\"lit\":\"Reaction Game\"},\"font\":{\"lit\":2},\"color\":\"yellow\"}},"
-  "{\"render\":{\"type\":\"circle\",\"x\":{\"lit\":120},\"y\":{\"lit\":140},\"r\":{\"lit\":50},\"color\":\"green\"}},"
-  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":65},\"y\":{\"lit\":200},\"src\":{\"lit\":\"READY...\"},\"font\":{\"lit\":2},\"color\":\"white\"}},"
-  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":30},\"y\":{\"lit\":240},\"src\":{\"lit\":\"(wait for GO)\"},\"font\":{\"lit\":2},\"color\":\"darkgrey\"}},"
-  "{\"stamp\":{\"slot\":\"wait_start\"}},"
-  "{\"set\":{\"slot\":\"phase\",\"value\":{\"lit\":1}}}"
-  "]},"
-  "{\"guard\":{\"op\":\"eq\",\"a\":{\"slot\":\"phase\"},\"b\":{\"lit\":1}},\"run\":["
-  "{\"if\":{\"guard\":{\"op\":\"elapsed_ge\",\"a\":{\"slot\":\"wait_start\"},\"b\":{\"slot\":\"delay_ms\"}},\"then\":["
-  "{\"set\":{\"slot\":\"phase\",\"value\":{\"lit\":2}}},"
-  "{\"stamp\":{\"slot\":\"go_at\"}},"
-  "{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},"
-  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":70},\"y\":{\"lit\":40},\"src\":{\"lit\":\"Reaction Game\"},\"font\":{\"lit\":2},\"color\":\"yellow\"}},"
-  "{\"render\":{\"type\":\"circle\",\"x\":{\"lit\":120},\"y\":{\"lit\":140},\"r\":{\"lit\":50},\"color\":\"red\"}},"
-  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":75},\"y\":{\"lit\":210},\"src\":{\"lit\":\"TAP!\"},\"font\":{\"lit\":2},\"color\":\"white\"}},"
-  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":30},\"y\":{\"lit\":240},\"src\":{\"lit\":\"Touch the screen!\"},\"font\":{\"lit\":2},\"color\":\"white\"}}"
-  "]}]},"
-  "{\"guard\":{\"op\":\"eq\",\"a\":{\"slot\":\"phase\"},\"b\":{\"lit\":2}},\"run\":["
-  "{\"if\":{\"guard\":{\"op\":\"elapsed_ge\",\"a\":{\"slot\":\"show_until\"},\"b\":{\"lit\":3000}},\"then\":["
-  "{\"set\":{\"slot\":\"phase\",\"value\":{\"lit\":0}}}]}]}"
-  "]},"
-  "{\"name\":\"touch-down\",\"region\":{\"x\":0,\"y\":0,\"w\":240,\"h\":320},\"handlers\":["
-  "{\"guard\":{\"op\":\"eq\",\"a\":{\"slot\":\"phase\"},\"b\":{\"lit\":2}},\"run\":["
-  "{\"now_minus\":{\"slot\":\"touch_ms\",\"from\":{\"slot\":\"go_at\"}}},"
-  "{\"format\":{\"slot\":\"result_txt\",\"op\":\"ms\",\"src\":{\"slot\":\"touch_ms\"}}},"
-  "{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},"
-  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":70},\"y\":{\"lit\":40},\"src\":{\"lit\":\"Reaction Game\"},\"font\":{\"lit\":2},\"color\":\"yellow\"}},"
-  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":40},\"y\":{\"lit\":110},\"src\":{\"slot\":\"result_txt\"},\"font\":{\"lit\":6},\"color\":\"green\"}},"
-  "{\"stamp\":{\"slot\":\"show_until\"}}"
-  "]}]}"
-  "]}]}";
+  "{\"id\":\"reaction-game\",\"name\":\"Reaction Game\",\"layout\":\"fullscreen\",\"state\":[{\"name\":\"phase\",\"type\":\"int64\",\"init\":0},{\"name\":\"wait_start\",\"type\":\"int64\",\"init\":0},{\"name\":\"go_at\",\"type\":\"int64\",\"init\":0},{\"name\":\"delay_ms\",\"type\":\"int64\",\"init\":3000},{\"name\":\"touch_ms\",\"type\":\"int64\",\"init\":0},{\"name\":\"show_until\",\"type\":\"int64\",\"init\":0},{\"name\":\"result_txt\",\"type\":\"string\",\"init\":\"00:00\"}],\"events\":[{\"name\":\"tick\",\"schedule\":{\"type\":\"interval\",\"ms\":100},\"handlers\":[{\"guard\":{\"op\":\"eq\",\"a\":{\"slot\":\"phase\"},\"b\":{\"lit\":0}},\"run\":[{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":70},\"y\":{\"lit\":40},\"src\":{\"lit\":\"Reaction Game\"},\"font\":{\"lit\":2},\"color\":\"yellow\"}},{\"render\":{\"type\":\"circle\",\"x\":{\"lit\":120},\"y\":{\"lit\":140},\"r\":{\"lit\":50},\"color\":\"green\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":65},\"y\":{\"lit\":200},\"src\":{\"lit\":\"READY...\"},\"font\":{\"lit\":2},\"color\":\"white\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":30},\"y\":{\"lit\":240},\"src\":{\"lit\":\"(wait for GO)\"},\"font\":{\"lit\":2},\"color\":\"darkgrey\"}},{\"stamp\":{\"slot\":\"wait_start\"}},{\"set\":{\"slot\":\"phase\",\"value\":{\"lit\":1}}}]},{\"guard\":{\"op\":\"eq\",\"a\":{\"slot\":\"phase\"},\"b\":{\"lit\":1}},\"run\":[{\"if\":{\"guard\":{\"op\":\"elapsed_ge\",\"a\":{\"slot\":\"wait_start\"},\"b\":{\"slot\":\"delay_ms\"}},\"then\":[{\"set\":{\"slot\":\"phase\",\"value\":{\"lit\":2}}},{\"stamp\":{\"slot\":\"go_at\"}},{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":70},\"y\":{\"lit\":40},\"src\":{\"lit\":\"Reaction Game\"},\"font\":{\"lit\":2},\"color\":\"yellow\"}},{\"render\":{\"type\":\"circle\",\"x\":{\"lit\":120},\"y\":{\"lit\":140},\"r\":{\"lit\":50},\"color\":\"red\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":75},\"y\":{\"lit\":210},\"src\":{\"lit\":\"TAP!\"},\"font\":{\"lit\":2},\"color\":\"white\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":30},\"y\":{\"lit\":240},\"src\":{\"lit\":\"Touch the screen!\"},\"font\":{\"lit\":2},\"color\":\"white\"}}]}}]},{\"guard\":{\"op\":\"eq\",\"a\":{\"slot\":\"phase\"},\"b\":{\"lit\":2}},\"run\":[{\"if\":{\"guard\":{\"op\":\"elapsed_ge\",\"a\":{\"slot\":\"show_until\"},\"b\":{\"lit\":3000}},\"then\":[{\"set\":{\"slot\":\"phase\",\"value\":{\"lit\":0}}}]}}]}]},{\"name\":\"touch-down\",\"region\":{\"x\":0,\"y\":0,\"w\":240,\"h\":320},\"handlers\":[{\"guard\":{\"op\":\"eq\",\"a\":{\"slot\":\"phase\"},\"b\":{\"lit\":2}},\"run\":[{\"now_minus\":{\"slot\":\"touch_ms\",\"from\":{\"slot\":\"go_at\"}}},{\"format\":{\"slot\":\"result_txt\",\"op\":\"react\",\"src\":{\"slot\":\"touch_ms\"}}},{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":70},\"y\":{\"lit\":40},\"src\":{\"lit\":\"Reaction Game\"},\"font\":{\"lit\":2},\"color\":\"yellow\"}},{\"render\":{\"type\":\"text\",\"x\":{\"lit\":40},\"y\":{\"lit\":110},\"src\":{\"slot\":\"result_txt\"},\"font\":{\"lit\":6},\"color\":\"green\"}},{\"stamp\":{\"slot\":\"show_until\"}}]}]}]}";
 
 /* ==========================================================
    Behavior loading (needs the PROGMEM arrays above for the built-in fallback)
