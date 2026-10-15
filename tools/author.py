@@ -36,7 +36,10 @@ BEHAVIORS = os.path.join(REPO, "behaviors")
 sys.path.insert(0, HERE)
 from validate_behavior import Behavior  # noqa: E402
 
-KEY_FILE = os.path.expanduser("~/.hermes/keys/openrouter")
+# Key path is overridable via OPENROUTER_KEY_FILE (portable for public repo);
+# defaults to the original location for backwards compat.
+KEY_FILE = os.environ.get("OPENROUTER_KEY_FILE",
+                          os.path.expanduser("~/.hermes/keys/openrouter"))
 MODEL = "deepseek/deepseek-v4-flash-0731"
 OPENROUTER = "https://openrouter.ai/api/v1/chat/completions"
 

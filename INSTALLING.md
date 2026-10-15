@@ -1,0 +1,208 @@
+# OneBoard — Installation & Setup
+
+End-to-end guide: from a bare machine to a live, controllable board.
+
+**Time:** ~20 minutes first time (mostly platform downloads).
+
+---
+
+## 1. Hardware you need
+
+- A **CYD ESP32-2432S028(R)** board ("Cheap Yellow Display", 240×320)
+- A **USB data cable** (micro-USB; power-only cables won't flash)
+- A computer with USB (Linux, macOS, or Windows)
+- A **WiFi network** your board can join
+
+> The repo targets the 2432S028. If your board has a different display
+> controller, check `platformio.ini` and the docs before flashing — the CYD
+> pin map is display-specific.
+
+---
+
+## 2. Install PlatformIO
+
+PlatformIO is the build/flash toolchain.
+
+**Linux / macOS:**
+```bash
+pip install --user platformio
+# or via the standalone installer:
+# curl -fsSL https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py | python3 -
+```
+**Windows:** install [VSCode](https://code.visualstudio.com) + the PlatformIO IDE extension, then use the PlatformIO terminal below.
+
+Verify:
+```bash
+pio --version
+```
+
+---
+
+## 3. Get the code
+
+```bash
+git clone https://github.com/bradthurston-creator/OneBoard.git
+cd OneBoard
+```
+
+---
+
+## 4. Flash the firmware
+
+Plug the board in and find its serial port:
+- Linux: `/dev/ttyUSB0` (check `ls /dev/ttyUSB*`)
+- macOS: `/dev/cu.usbserial-*` or `/dev/cu.wchusbserial*`
+- Windows: `COM3` etc (Device Manager → Ports)
+
+Build and flash:
+```bash
+pio run -t upload --upload-port /dev/ttyUSB0     # adjust port for your OS
+```
+
+Watch it boot (optional, 115200 baud):
+```bash
+pio run -t monitor
+```
+
+You should see `OneBoard Stage 3 ready` and the board's AP appear.
+
+---
+
+## 5. First boot — join it to WiFi (captive portal)
+
+1. Power the board (USB is fine). It boots into **provisioning mode** — it
+   creates its own WiFi access point.
+2. On your phone: **Settings → WiFi → join `OneBoard-Stage3`** (no password).
+3. The captive-portal page **auto-opens** (if not, browse to `http://192.168.4.1`).
+4. Enter your home WiFi **SSID + password** and tap **Join Home WiFi**.
+5. The board joins your network and shows its new IP on screen (also visible
+   at `/status`).
+
+From now on the board remembers the WiFi in NVS — it auto-joins on every boot.
+
+> No serial cable, no BOOT button, ever again. The captive portal intercepts
+> the standard phone probes (Apple/Google/Microsoft) so the page just opens.
+
+---
+
+## 6. Point the board at a behavior store
+
+Tools ("behaviors") are JSON files served from a machine on your network —
+the board loads them over WiFi, compiles them to bytecode, and runs them.
+
+Start the store on a machine that stays on (your desktop, a VPS, a Pi):
+
+```bash
+cd OneBoard
+python3 store/serve.py --port 8082
+```
+
+Then tell the board where the store lives (web page → **Set Store URL**):
+
+```
+http://192.168.1.169:8082
+```
+
+(Use the store machine's actual LAN IP. If port 8080 is free on your network
+you can run `--port 8080` instead.)
+
+Verify: browse to `http://<board-ip>/` — the **Tools** list should populate
+from the store automatically.
+
+---
+
+## 7. Author tools with an LLM (optional but the point of the project)
+
+`tools/author.py` turns a plain-English request into a working tool on the
+board. It needs an OpenRouter API key:
+
+1. Get a key at https://openrouter.ai (a few dollars of credit is plenty).
+2. Store it where the tool can read it:
+   ```bash
+   echo "sk-or-v1-..." > ~/.openrouter_key
+   chmod 600 ~/.openrouter_key
+   ```
+3. Author your first tool:
+   ```bash
+   cd OneBoard
+   python3 tools/validate_behavior.py behaviors/dice.json   # sanity check first
+   OPENROUTER_KEY_FILE=~/.openrouter_key \
+     python3 tools/author.py "I want a dice roller that rolls 1-6" --board 192.168.1.206
+   ```
+
+The pipeline: LLM writes JSON against the board's vocabulary → validated →
+self-corrected on errors → saved to `behaviors/` → pushed live to the board
+via `/store` + `/load`. No reflash.
+
+> Six behaviors ship in `behaviors/` and are embedded in firmware as offline
+> fallbacks: timer, temp-logger, reaction-game, tap-counter, stopwatch, dice.
+
+---
+
+## 8. Control from Telegram (optional)
+
+1. In Telegram, message **@BotFather** → `/newbot` → pick a name and username.
+   Copy the token it gives you.
+2. Create the bot's env file (never commit it):
+   ```bash
+   cp systemd/oneboard-telegram.env.template ~/.hermes/keys/oneboard-telegram.env
+   # fill in: ONBOARD_BOT_TOKEN=<your token>
+   #          ONBOARD_BOARD_IP=<board ip>
+   #          ONBOARD_STORE_URL=http://<store-machine>:8082
+   #          ONBOARD_ALLOWED=<your telegram numeric user id>
+   ```
+3. Set up the Python venv and install the bot's only dependency:
+   ```bash
+   cd OneBoard
+   python3 -m venv .venv
+   .venv/bin/pip install python-telegram-bot
+   ```
+4. Install + start the service:
+   ```bash
+   mkdir -p ~/.config/systemd/user
+   cp systemd/oneboard-tg-bot.service ~/.config/systemd/user/
+   systemctl --user daemon-reload
+   systemctl --user enable --now oneboard-tg-bot
+   ```
+5. In Telegram, message your bot: `/status`, `/tools`, `/load dice`, `/schema`, `/help`.
+
+> The `oneboard-tg-bot.service` file has `WorkingDirectory` /
+> `EnvironmentFile` paths written for this repo's original machine — edit them
+> to match your setup before installing.
+
+---
+
+## 9. View the screen from any browser
+
+Open `tools/board_view.html` in a browser, enter the board's IP, and it
+renders the board's actual screen from `/schema` + the behavior + `/state` —
+with live state and a "simulate tap" button.
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| White screen / 4-digit number on boot | Wrong display driver config — this board needs `ILI9341_2_DRIVER`, `USE_HSPI_PORT`, fonts 2/4/6 (see `platformio.ini`). Don't "simplify" it. |
+| Touch does nothing | Touch is on separate VSPI; `USE_HSPI_PORT` is **mandatory** or touch is silently dead. |
+| `/load` fails on the board | Is `store/serve.py` running? Is the store URL set correctly on the board? Test `curl http://<store>:8082/` from the same network. |
+| `ModuleNotFoundError: No module named 'telegram'` | Run the bot with `.venv/bin/python`, not system python (step 8.3). |
+| Author tool returns empty / stalls | DeepSeek on OpenRouter can burn its budget on invisible reasoning — the tool already sends `reasoning:{enabled:false}`; make sure your key has credit. |
+| Captive portal page doesn't auto-open | Browse manually to `http://192.168.4.1` after joining the AP. |
+
+---
+
+## Quick reference
+
+```
+Board IP (AP) : 192.168.4.1         Board IP (WiFi): shown on screen / /status
+Store port    : 8082 (8080 often taken by other services)
+Serial        : /dev/ttyUSB0 @ 115200
+Key file      : OPENROUTER_KEY_FILE (author tool)
+Bot token     : ~/.hermes/keys/oneboard-telegram.env (0600)
+WiFi creds    : board NVS only — never in the repo, never in chat
+```
+
+See [docs/BEHAVIOR-AUTHORING.md](docs/BEHAVIOR-AUTHORING.md) for the full
+behavior authoring reference, and the [README](README.md) for architecture.

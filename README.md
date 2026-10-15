@@ -8,6 +8,9 @@ stopwatch, a dice roller — **without ever reflashing the firmware**.
 Any client can drive it and render its screen from the board's own
 self-description: a web page, a Telegram bot, or an LLM.
 
+> **New here? Start with [INSTALLING.md](INSTALLING.md)** — step-by-step from
+> a bare machine to a live, controllable board (~20 min).
+
 ---
 
 ## What makes it different

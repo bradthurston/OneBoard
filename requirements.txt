@@ -1,0 +1,10 @@
+# OneBoard host-side Python dependencies.
+#
+# Only the Telegram bot needs a third-party package.
+#   - tools/author.py, tools/validate_behavior.py, store/serve.py: stdlib only
+#   - tools/board_view.html: no Python (browser client)
+#
+# Install into the project venv (see INSTALLING.md):
+#   python3 -m venv .venv
+#   .venv/bin/pip install -r requirements.txt
+python-telegram-bot==22.8
