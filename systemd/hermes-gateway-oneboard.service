@@ -1,0 +1,15 @@
+[Unit]
+Description=OneBoard Telegram control bot
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/brad/projects/oneboard
+# Token goes in the EnvironmentFile (NOT this file, and never in chat):
+EnvironmentFile=/home/brad/.hermes/keys/oneboard-telegram.env
+ExecStart=/usr/bin/python3 /home/brad/projects/oneboard/tools/oneboard_bot.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
