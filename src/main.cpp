@@ -286,16 +286,16 @@ void handleRoot() {
       ".active{background:#4af;color:#000;border-color:#4af}"
       ".footer{margin-top:18px;font-size:0.8em;color:#666}"
     "</style></head><body>"
-    "<h1>&#9670; OneBoard Stage 2</h1>"
+    "<h1>&#9670; OneBoard</h1>"
     "<div class='store-url' id='storeLabel'></div>"
     "<div class='demo-name' id='current'></div>"
     "<div id='provBanner' style='display:none;border:2px solid #f80;border-radius:10px;padding:10px;margin:10px auto;max-width:280px;color:#ff0;font-size:0.95em'>"
       "&#128225; FIRST SETUP — pick your home WiFi below, then the board joins it and you can reach it there from now on."
     "</div>"
-    "<button id='btn-timer' onclick='loadTool(\"timer\")'>&#9201; Timer</button>"
-    "<button id='btn-temp-logger' onclick='loadTool(\"temp-logger\")'>&#127777; Temp Logger</button>"
-    "<button id='btn-reaction-game' onclick='loadTool(\"reaction-game\")'>&#9889; Reaction Game</button>"
-    "<button id='btn-tap-counter' onclick='loadTool(\"tap-counter\")'>&#128073; Tap Counter</button>"
+    "<div id='tools' style='text-align:left;max-width:280px;margin:10px auto'>"
+      "<div style='font-size:0.9em;color:#9cf;margin-bottom:6px'>Tools (from store)</div>"
+      "<div id='toolList'>loading...</div>"
+    "</div>"
     "<div style='margin-top:18px;border-top:1px solid #444;padding-top:12px'>"
       "<div style='font-size:0.9em;color:#9cf;margin-bottom:6px'>WiFi (join your home network)</div>"
       "<input id='wifiSsid' type='text' style='width:100%;max-width:280px;padding:8px;background:#222;color:#fff;border:1px solid #555'"
@@ -310,7 +310,7 @@ void handleRoot() {
         " placeholder='Store URL' />"
       "<button onclick='setStore()' style='background:#333;border-color:#4af'>Set Store URL</button>"
     "</div>"
-    "<div class='footer'>OneBoard Stage 2 — CYD 2432S028</div>"
+    "<div class='footer'>OneBoard — CYD 2432S028 (self-describing)</div>"
     "<script>"
       "async function loadTool(id){"
         "try{"
@@ -318,6 +318,21 @@ void handleRoot() {
           "var j=await r.json();"
           "if(j.ok)document.getElementById('current').innerText='Tool: '+j.tool"
         "}catch(e){}"
+      "}"
+      "async function renderTools(storeUrl){"
+        "try{"
+          "var r=await fetch(storeUrl.replace(/\\/$/,'')+'/');"
+          "var j=await r.json();"
+          "var el=document.getElementById('toolList');"
+          "if(!j.behaviors||!j.behaviors.length){el.innerText='(none in store)';return}"
+          "el.innerHTML='';"
+          "j.behaviors.forEach(function(f){"
+            "var id=f.replace(/\\.json$/,'');"
+            "var b=document.createElement('button');"
+            "b.id='btn-'+id;b.innerText=id;b.onclick=function(){loadTool(id)};"
+            "el.appendChild(b)"
+          "})"
+        "}catch(e){document.getElementById('toolList').innerText='store unreachable'}"
       "}"
       "async function setStore(){"
         "var v=document.getElementById('storeInput').value.trim();"
@@ -346,6 +361,7 @@ void handleRoot() {
         "document.getElementById('storeLabel').innerText='Store: '+j.store_url + (j.wifi?' | WiFi IP: '+j.ip:'');"
         "document.getElementById('storeInput').value=j.store_url;"
         "if(j.provisioning)document.getElementById('provBanner').style.display='block';"
+        "renderTools(j.store_url);"
         "var b=document.getElementById('btn-'+j.tool);"
         "if(b)b.className='active'"
       "}).catch(()=>{})"
@@ -397,6 +413,57 @@ void handleStatus() {
   json += ",\"ip\":\"";
   json += wifiStationOk ? WiFi.localIP().toString() : "";
   json += "\"}";
+  server.send(200, "application/json", json);
+}
+
+/* ==========================================================
+   /state — live VM state: every slot (name, type, value) plus
+   the render primitives. Any client can use this (with /schema
+   and the behavior JSON from the store) to render the board's
+   screen itself — the "any-client self-description" story.
+   ========================================================== */
+void handleState() {
+  String json = "{\"tool\":\"";
+  json += activeToolId;
+  json += "\",\"slots\":[";
+  for (uint8_t i = 0; i < g_prog.slot_count; i++) {
+    if (i) json += ",";
+    json += "{\"name\":\"";
+    json += g_prog.slots[i].name;
+    json += "\",\"type\":\"";
+    switch (g_prog.slots[i].type) {
+      case SLOT_INT64: json += "int64"; break;
+      case SLOT_FLOAT: json += "float"; break;
+      case SLOT_BOOL:  json += "bool";  break;
+      case SLOT_STRING: json += "string"; break;
+    }
+    json += "\",\"value\":";
+    switch (g_prog.slots[i].type) {
+      case SLOT_STRING:
+        json += "\"";
+        json += g_state.sval[i];
+        json += "\"";
+        break;
+      case SLOT_FLOAT: {
+        char b[16];
+        dtostrf(g_state.fval[i], 0, 1, b);
+        json += b;
+        break;
+      }
+      default:
+        json += String((long long)g_state.ival[i]);
+        break;
+    }
+    json += "}";
+  }
+  json += "],\"renders\":[";
+  for (uint8_t i = 0; i < g_prog.render_count; i++) {
+    if (i) json += ",";
+    json += "{\"type\":";
+    json += g_prog.renders[i].type;
+    json += "}";
+  }
+  json += "]}";
   server.send(200, "application/json", json);
 }
 
@@ -522,6 +589,7 @@ void setup() {
   server.on("/",        handleRoot);
   server.on("/load",    handleLoad);
   server.on("/status",  handleStatus);
+  server.on("/state",   handleState);
   server.on("/schema",  handleSchema);
   server.on("/store",   handleStore);
   server.on("/wifi",    handleWifi);

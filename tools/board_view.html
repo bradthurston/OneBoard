@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OneBoard — live view</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: -apple-system, Helvetica, sans-serif; background: #111; color: #ddd; margin: 0; padding: 20px; }
+  h1 { font-size: 1.2em; color: #4af; margin: 0 0 4px; }
+  .sub { color: #888; font-size: 0.85em; margin-bottom: 14px; }
+  .wrap { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+  #screen { width: 240px; height: 320px; background: #000; border: 2px solid #333; border-radius: 8px; position: relative; overflow: hidden; }
+  #screen canvas { display: block; width: 240px; height: 320px; }
+  .panel { min-width: 300px; }
+  .panel h2 { font-size: 0.95em; color: #9cf; margin: 14px 0 6px; }
+  table { border-collapse: collapse; font-size: 0.85em; width: 100%; }
+  td { padding: 3px 8px; border-bottom: 1px solid #222; }
+  td:first-child { color: #aaa; }
+  button { padding: 8px 12px; margin: 3px; background: #222; color: #fff; border: 1px solid #555; border-radius: 6px; cursor: pointer; }
+  button.active { background: #4af; color: #000; border-color: #4af; }
+  button:hover { border-color: #4af; }
+  #err { color: #f55; font-size: 0.85em; margin-top: 10px; }
+  .badge { display:inline-block; padding: 1px 6px; border-radius: 4px; font-size: 0.75em; margin-left: 6px; background:#222; color:#888; }
+</style>
+</head>
+<body>
+  <h1>&#9670; OneBoard — live view</h1>
+  <div class="sub">Renders the board's screen in your browser from its self-description
+    (<code>/schema</code> + behavior JSON from the store + <code>/state</code>). No app, no firmware knowledge.</div>
+
+  <label>Board</label>
+  <input id="board" value="192.168.1.206" style="padding:6px;background:#222;color:#fff;border:1px solid #555;border-radius:6px;width:180px">
+  <button onclick="connect()">Connect</button>
+  <span id="status" class="badge">—</span>
+
+  <div class="wrap">
+    <div>
+      <div id="screen"><canvas id="cv" width="240" height="320"></canvas></div>
+      <div style="text-align:center;margin-top:8px">
+        <button id="btnTap" onclick="tap()">&#128073; Simulate tap</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Tools</h2>
+      <div id="tools"></div>
+
+      <h2>Live state (from /state)</h2>
+      <table id="state"><tr><td colspan="2">not connected</td></tr></table>
+
+      <h2>Self-description (from /schema)</h2>
+      <table id="schema"><tr><td colspan="2">not connected</td></tr></table>
+
+      <div id="err"></div>
+    </div>
+  </div>
+
+<script>
+"use strict";
+let BOARD = "192.168.1.206";
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+const FONTS = {1:10,2:16,3:24,4:32,5:40,6:48,7:56}; // approx px height per TFT font
+const COLORS = {black:"#000",white:"#fff",red:"#f00",green:"#0f0",blue:"#00f",yellow:"#ff0",
+  cyan:"#0ff",magenta:"#f0f",orange:"#ff8c00",navy:"#000080",darkgrey:"#555",darkgray:"#555",
+  grey:"#888",gray:"#888"};
+let currentTool = null;
+
+async function jget(url){ const r = await fetch(url); return await r.json(); }
+
+async function connect(){
+  BOARD = document.getElementById("board").value.trim() || BOARD;
+  document.getElementById("status").textContent = "connecting...";
+  document.getElementById("err").textContent = "";
+  try {
+    const st = await jget(`http://${BOARD}/status`);
+    document.getElementById("status").textContent = st.wifi ? `WiFi ${st.ip}` : "AP mode";
+    await Promise.all([renderTools(st.store_url), renderSchema(), refreshState()]);
+  } catch(e){ document.getElementById("status").textContent = "unreachable"; err("Cannot reach board at "+BOARD+": "+e); }
+}
+
+function err(m){ const el=document.getElementById("err"); el.textContent = m; }
+
+async function renderTools(storeUrl){
+  try {
+    const j = await jget(storeUrl.replace(/\/$/,'') + "/");
+    const el = document.getElementById("tools");
+    el.innerHTML = "";
+    (j.behaviors||[]).forEach(f=>{
+      const id = f.replace(/\.json$/,"");
+      const b = document.createElement("button");
+      b.textContent = id; b.onclick = ()=>loadTool(id);
+      el.appendChild(b);
+    });
+  } catch(e){ err("store unreachable ("+storeUrl+")"); }
+}
+
+async function loadTool(id){
+  await fetch(`http://${BOARD}/load?id=${encodeURIComponent(id)}`);
+  document.querySelectorAll("#tools button").forEach(b=>b.classList.toggle("active", b.textContent===id));
+  currentTool = id;
+  await refreshState();
+  await renderScreen();
+}
+
+async function renderSchema(){
+  try {
+    const s = await jget(`http://${BOARD}/schema`);
+    const el = document.getElementById("schema");
+    el.innerHTML = "";
+    row(el, "board", s.board + " (" + s.display + ")");
+    row(el, "verbs", s.verbs.join(", "));
+    row(el, "guards", s.guards.join(", "));
+    row(el, "render types", s.render_types.join(", "));
+    row(el, "limits", `slots ${s.limits.slots}, renders ${s.limits.renders}, instr ${s.limits.instructions}`);
+  } catch(e){ /* board offline */ }
+}
+function row(tbl, k, v){ const tr=document.createElement("tr");
+  const td1=document.createElement("td"); td1.textContent=k;
+  const td2=document.createElement("td"); td2.textContent=v;
+  tr.appendChild(td1); tr.appendChild(td2); tbl.appendChild(tr); }
+
+async function refreshState(){
+  try {
+    const s = await jget(`http://${BOARD}/state`);
+    const el = document.getElementById("state");
+    el.innerHTML = "";
+    (s.slots||[]).forEach(sl=>{
+      const tr = document.createElement("tr");
+      const td1=document.createElement("td"); td1.textContent=sl.name;
+      const td2=document.createElement("td"); td2.textContent=`${sl.type}: ${sl.value}`;
+      tr.appendChild(td1); tr.appendChild(td2); el.appendChild(tr);
+    });
+  } catch(e){ /* ignore */ }
+}
+
+/* ---- Screen renderer: draws the behavior's render primitives ---- */
+async function renderScreen(){
+  const el = document.getElementById("state");
+  const s = await jget(`http://${BOARD}/state`);
+  const st = await jget(`http://${BOARD}/status`);
+  const storeUrl = st.store_url.replace(/\/$/,'');
+  let doc;
+  try { doc = await jget(`${storeUrl}/${currentTool||s.tool}.json`); }
+  catch(e){ ctx.fillStyle="#000"; ctx.fillRect(0,0,240,320); return; }
+  const slots = {};
+  (s.slots||[]).forEach(x=>slots[x.name]=x.value);
+  const val = v => v && v.slot!==undefined ? slots[v.slot] : (v && v.lit!==undefined ? v.lit : (v&&v.lit));
+  const color = c => COLORS[c]||"#fff";
+
+  ctx.fillStyle="#000"; ctx.fillRect(0,0,240,320);
+
+  // Collect all render verbs from every handler (each screen starts with clear)
+  const verbs = [];
+  (doc.events||[]).forEach(ev=>{
+    (ev.handlers||[]).forEach(h=>{
+      const walk = a => (a||[]).forEach(v=>{
+        if(v.render) verbs.push(v.render);
+        else if(v.if){ walk(v.if.then); walk(v.if.else); }
+      });
+      walk(h.run);
+    });
+  });
+  verbs.forEach(rp=>{
+    const x = rp.x&&rp.x.slot!==undefined ? +slots[rp.x.slot] : (rp.x? (rp.x.lit!==undefined? rp.x.lit : rp.x) : 0);
+    const y = rp.y&&rp.y.slot!==undefined ? +slots[rp.y.slot] : (rp.y? (rp.y.lit!==undefined? rp.y.lit : rp.y) : 0);
+    const w = rp.w&&rp.w.slot!==undefined ? +slots[rp.w.slot] : (rp.w? (rp.w.lit!==undefined? rp.w.lit : rp.w) : 0);
+    const h = rp.h&&rp.h.slot!==undefined ? +slots[rp.h.slot] : (rp.h? (rp.h.lit!==undefined? rp.h.lit : rp.h) : 0);
+    const r = rp.r? (rp.r.lit!==undefined? rp.r.lit : rp.r) : 0;
+    const col = color(rp.color);
+    const txt = rp.src && rp.src.slot!==undefined ? String(slots[rp.src.slot]||"") : (rp.src&&rp.src.lit!==undefined ? String(rp.src.lit) : "");
+    const f = rp.font&&rp.font.lit!==undefined ? rp.font.lit : (rp.font||2);
+    const cx = rp.center ? x : x;
+
+    switch(rp.type){
+      case "clear": ctx.fillStyle=col; ctx.fillRect(0,0,240,320); break;
+      case "rect": ctx.strokeStyle=col; ctx.lineWidth=2; ctx.strokeRect(x,y,w,h); break;
+      case "fillrect": ctx.fillStyle=col; ctx.fillRect(x,y,w,h); break;
+      case "line": ctx.strokeStyle=col; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(w,h); ctx.stroke(); break;
+      case "circle": ctx.strokeStyle=col; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.stroke(); break;
+      case "bar": { ctx.fillStyle=col; ctx.fillRect(x,y,w,h); break; }
+      case "text": {
+        const size = FONTS[f]||16;
+        ctx.fillStyle=col; ctx.font = `${size}px sans-serif`;
+        ctx.textBaseline="middle";
+        if(rp.center){ ctx.textAlign="center"; ctx.fillText(txt, x, y); }
+        else { ctx.textAlign="left"; ctx.fillText(txt, x, y); }
+        break;
+      }
+      case "graph": { /* simple line of last 10 values from state — approximated */ break; }
+    }
+  });
+}
+
+async function tap(){
+  try { await fetch(`http://${BOARD}/load?id=${currentTool||"dice"}`); } catch(e){}
+  await new Promise(r=>setTimeout(r,50));
+  await refreshState();
+  await renderScreen();
+}
+window.addEventListener("load", ()=>connect());
+</script>
+</body>
+</html>
