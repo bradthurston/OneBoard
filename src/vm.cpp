@@ -340,11 +340,17 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     auto parseCoord = [&](const char* key, int16_t* out_val, uint8_t* out_slot) {
       JsonVariant v = p[key];
       if (v.isNull()) return;
-      if (v.is<JsonObject>() && v["slot"].is<const char*>()) {
-        int si = resolveSlotIndex(rootState, v["slot"]);
-        if (si >= 0) { *out_slot = (uint8_t)si; *out_val = 0; }
+      if (v.is<JsonObject>()) {
+        JsonObject o = v.as<JsonObject>();
+        if (o["slot"].is<const char*>()) {
+          int si = resolveSlotIndex(rootState, o["slot"]);
+          if (si >= 0) { *out_slot = (uint8_t)si; *out_val = 0; }
+        } else if (o.containsKey("lit")) {
+          *out_val = (int16_t)o["lit"].as<int64_t>();
+          *out_slot = 0xFF;
+        }
       } else {
-        *out_val = (int16_t)(int64_t)(v | (int64_t)0);
+        *out_val = (int16_t)v.as<int64_t>();
         *out_slot = 0xFF;
       }
     };
@@ -390,7 +396,18 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
       return 0;
     prog->guard_count++;
 
-    // Compile 'then' block
+    // Emit OP_IF FIRST (then/else blocks follow it in the stream):
+    //   [OP_IF (guard gi, a_val=then_count, b_val=else_count)]
+    //   [then instructions...]
+    //   [else instructions...]
+    uint8_t if_idx = prog->instr_count;
+    Instr* ii = &prog->instrs[if_idx];
+    memset(ii, 0, sizeof(Instr));
+    ii->op = OP_IF;
+    ii->dst = gi;           // guard index
+    prog->instr_count++;
+
+    // Compile 'then' block (immediately after OP_IF)
     uint8_t then_start = 0, then_count = 0;
     compileBlock(rootState, p["then"], prog, &then_start, &then_count);
 
@@ -399,15 +416,11 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     if (p["else"].is<JsonArray>())
       compileBlock(rootState, p["else"], prog, &else_start, &else_count);
 
-    // Emit OP_IF instruction
-    Instr* ii = &prog->instrs[prog->instr_count];
-    memset(ii, 0, sizeof(Instr));
-    ii->op = OP_IF;
-    ii->dst = gi;           // guard index
     ii->a_val = then_count; // number of instructions in 'then'
     ii->b_val = else_count; // number of instructions in 'else'
-    prog->instr_count++;
-    return 1;
+
+    // The handler count must account for OP_IF + then + else
+    return 1 + then_count + else_count;
   }
 
   return 0; // unknown verb — skip
@@ -623,6 +636,9 @@ static bool evalGuard(const VmState* state, const Guard* g, unsigned long now) {
 // Execute a single instruction against runtime state
 // Returns number of instructions to skip (for OP_IF)
 // ============================================================
+static void execRange(VmState* state, const VmProgram* prog,
+                      uint8_t start, uint8_t count, unsigned long now);
+
 static int execInstr(VmState* state, const VmProgram* prog,
                      const Instr* instr, unsigned long now) {
   switch (instr->op) {
@@ -717,16 +733,17 @@ static int execInstr(VmState* state, const VmProgram* prog,
 
     case OP_IF: {
       const Guard* g = &prog->guards[instr->dst];
+      // Layout: [OP_IF][then: a_val instrs][else: b_val instrs]
+      uint8_t base = (uint8_t)(instr - prog->instrs);
       if (evalGuard(state, g, now)) {
         // Execute 'then' block (immediately following this instr)
-        // a_val = then_count instructions
-        return 1 + instr->a_val; // skip 'then' block + the 'else' block
+        execRange(state, prog, base + 1, instr->a_val, now);
       } else {
-        // Skip 'then' block, optionally execute 'else'
-        // b_val = else_count instructions
-        // Return 1 + then_count + else_count to skip both
-        return 1 + instr->a_val + instr->b_val;
+        // Execute 'else' block (after the then block)
+        execRange(state, prog, base + 1 + instr->a_val, instr->b_val, now);
       }
+      // Skip OP_IF + then + else entirely
+      return 1 + instr->a_val + instr->b_val;
     }
 
     default:
