@@ -7,6 +7,7 @@
 #include <TFT_eSPI.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <DNSServer.h>
 #include <Preferences.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
@@ -82,8 +83,10 @@ static bool touchReadScreen(uint16_t *sx, uint16_t *sy) {
    ========================================================== */
 TFT_eSPI      tft = TFT_eSPI();
 WebServer     server(80);
+DNSServer     dnsServer;
 Preferences   prefs;
 bool          wifiStationOk = false;
+bool          provisioningMode = false;  // no WiFi saved yet — captive portal up
 
 String        activeToolId = DEFAULT_TOOL;
 String        storeUrl     = DEFAULT_STORE;
@@ -286,6 +289,9 @@ void handleRoot() {
     "<h1>&#9670; OneBoard Stage 2</h1>"
     "<div class='store-url' id='storeLabel'></div>"
     "<div class='demo-name' id='current'></div>"
+    "<div id='provBanner' style='display:none;border:2px solid #f80;border-radius:10px;padding:10px;margin:10px auto;max-width:280px;color:#ff0;font-size:0.95em'>"
+      "&#128225; FIRST SETUP — pick your home WiFi below, then the board joins it and you can reach it there from now on."
+    "</div>"
     "<button id='btn-timer' onclick='loadTool(\"timer\")'>&#9201; Timer</button>"
     "<button id='btn-temp-logger' onclick='loadTool(\"temp-logger\")'>&#127777; Temp Logger</button>"
     "<button id='btn-reaction-game' onclick='loadTool(\"reaction-game\")'>&#9889; Reaction Game</button>"
@@ -339,6 +345,7 @@ void handleRoot() {
         "document.getElementById('current').innerText='Tool: '+j.tool;"
         "document.getElementById('storeLabel').innerText='Store: '+j.store_url + (j.wifi?' | WiFi IP: '+j.ip:'');"
         "document.getElementById('storeInput').value=j.store_url;"
+        "if(j.provisioning)document.getElementById('provBanner').style.display='block';"
         "var b=document.getElementById('btn-'+j.tool);"
         "if(b)b.className='active'"
       "}).catch(()=>{})"
@@ -364,6 +371,7 @@ void handleWifi() {
     saveConfigStr(WIFI_SSID_KEY, ssid.c_str());
     saveConfigStr(WIFI_PASS_KEY, pass.c_str());
     bool ok = wifiStationConnect(false);
+    if (ok) provisioningMode = false;  // done setting up
     String ip = ok ? WiFi.localIP().toString() : "";
     String json = "{\"ok\":";
     json += ok ? "true" : "false";
@@ -384,6 +392,8 @@ void handleStatus() {
   json += vmInitialized ? "true" : "false";
   json += ",\"wifi\":";
   json += wifiStationOk ? "true" : "false";
+  json += ",\"provisioning\":";
+  json += provisioningMode ? "true" : "false";
   json += ",\"ip\":\"";
   json += wifiStationOk ? WiFi.localIP().toString() : "";
   json += "\"}";
@@ -432,6 +442,28 @@ void handleStore() {
 }
 
 void handleNotFound() {
+  // Captive-portal detection: phones probe well-known URLs when joining a
+  // WiFi network. Answer them with a redirect to the config page so iOS /
+  // Android auto-open the setup form (the whole point of "join my AP and it
+  // just works"). Also redirect anything aimed at the AP during provisioning.
+  String host = server.hostHeader();
+  String path = server.uri();
+  bool isProbe =
+      path == "/generate_204" || path == "/gen_204" ||
+      path == "/hotspot-detect.html" || path == "/canonical.html" ||
+      path == "/success.txt" || path == "/ncsi.txt" ||
+      path == "/connecttest.txt" || path == "/library/test/success.html" ||
+      path == "/check_network_status.txt" ||
+      path == "/fwlink/" || host.indexOf("connectivitycheck") >= 0 ||
+      host.indexOf("gstatic.com") >= 0 || host.indexOf("apple.com") >= 0 ||
+      host.indexOf("msftconnecttest") >= 0;
+  if (isProbe || provisioningMode) {
+    // 302 to the config page — the phone's captive browser follows it and
+    // shows our setup form automatically.
+    server.sendHeader("Location", "http://192.168.4.1/", true);
+    server.send(302, "text/plain", "redirect");
+    return;
+  }
   server.send(404, "text/plain", "404 Not Found\n");
 }
 
@@ -460,9 +492,29 @@ void setup() {
   storeUrl = loadConfigStr(STORE_KEY, DEFAULT_STORE);
   activeToolId = loadConfigStr(ACTIVE_KEY, DEFAULT_TOOL);
 
+  // Provisioning mode: no saved WiFi creds -> keep the captive portal as the
+  // primary experience (redirect everything to the setup form).
+  provisioningMode = (loadConfigStr(WIFI_SSID_KEY, "").length() == 0);
+
   tryStationConnect();
 
   WiFi.softAP(SOFT_AP_SSID, SOFT_AP_PSK);
+
+  // Captive-portal DNS: answer EVERY domain with the AP's IP so a phone that
+  // joins the board's WiFi resolves any hostname to us and the captive portal
+  // opens. Only needed on the AP (always up).
+  dnsServer.start(53, "*", WiFi.softAPIP());
+  if (provisioningMode) {
+    Serial.println("PROVISIONING MODE — join AP to set WiFi");
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+    tft.drawString("Join AP to set up:", 10, 60, 2);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.drawString(String(SOFT_AP_SSID), 10, 90, 2);
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.drawString("Open browser, page opens", 10, 140, 2);
+    tft.drawString("http://192.168.4.1", 10, 170, 2);
+  }
 
   seedDefaultBehaviors();
   loadBehavior(activeToolId.c_str());
@@ -490,6 +542,7 @@ void setup() {
    ========================================================== */
 void loop() {
   server.handleClient();
+  dnsServer.processNextRequest();
   unsigned long now = millis();
 
   if (vmInitialized) {
