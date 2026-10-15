@@ -132,4 +132,31 @@
  /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/spi_flash/include/esp_spi_flash_counters.h \
  /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/esp_hw_support/include/soc/esp32/spiram.h \
  /home/brad/.platformio/packages/framework-arduinoespressif32/cores/esp32/io_pin_remap.h \
- /home/brad/.platformio/packages/framework-arduinoespressif32/cores/esp32/Arduino.h
+ /home/brad/.platformio/packages/framework-arduinoespressif32/cores/esp32/Arduino.h \
+ .pio/libdeps/esp32-2432s028/TFT_eSPI/TFT_eSPI.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/cores/esp32/Print.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/libraries/SPI/src/SPI.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-spi.h \
+ .pio/libdeps/esp32-2432s028/TFT_eSPI/User_Setup_Select.h \
+ .pio/libdeps/esp32-2432s028/TFT_eSPI/TFT_Drivers/ILI9341_Defines.h \
+ .pio/libdeps/esp32-2432s028/TFT_eSPI/Processors/TFT_eSPI_ESP32.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/esp32/include/soc/spi_reg.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/driver/include/driver/spi_master.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/driver/include/driver/spi_common.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/include/soc/lldesc.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/esp_rom/include/esp32/rom/lldesc.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/include/soc/spi_periph.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/esp32/include/soc/periph_defs.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/esp32/include/soc/soc_pins.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/esp32/include/soc/gpio_pins.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/esp32/include/soc/spi_pins.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/esp32/include/soc/sdio_slave_pins.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/esp32/include/soc/sdmmc_pins.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/esp32/include/soc/spi_struct.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/hal/include/hal/spi_types.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/hal/esp32/include/hal/gpio_ll.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/esp32/include/soc/rtc_cntl_reg.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/esp32/include/soc/rtc_io_reg.h \
+ /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/hal/platform_port/include/hal/misc.h \
+ .pio/libdeps/esp32-2432s028/TFT_eSPI/Extensions/Button.h \
+ .pio/libdeps/esp32-2432s028/TFT_eSPI/Extensions/Sprite.h
