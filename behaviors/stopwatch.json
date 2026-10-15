@@ -27,16 +27,15 @@
   "events": [
     {
       "name": "tick",
-      "schedule": {"type": "interval", "ms": 100},
+      "schedule": {"type": "interval", "ms": 1000},
       "handlers": [
         {
           "guard": {"op": "is_true", "a": {"slot": "running"}},
           "run": [
             {"now_minus": {"slot": "elapsed_ms", "from": {"slot": "start_stamp"}}},
             {"format": {"slot": "display", "op": "ms", "src": {"slot": "elapsed_ms"}}},
-            {"render": {"type": "clear", "color": "black"}},
-            {"render": {"type": "text", "x": {"lit": 120}, "y": {"lit": 120}, "src": {"slot": "display"}, "font": {"lit": 6}, "color": "white", "center": true}},
-            {"render": {"type": "text", "x": {"lit": 120}, "y": {"lit": 200}, "src": {"lit": "TAP TO STOP"}, "font": {"lit": 2}, "color": "green", "center": true}}
+            {"render": {"type": "fillrect", "x": {"lit": 20}, "y": {"lit": 85}, "w": {"lit": 200}, "h": {"lit": 70}, "color": "black"}},
+            {"render": {"type": "text", "x": {"lit": 120}, "y": {"lit": 120}, "src": {"slot": "display"}, "font": {"lit": 6}, "color": "white", "center": true}}
           ]
         }
       ]
