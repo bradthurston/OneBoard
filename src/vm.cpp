@@ -326,6 +326,7 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     else return 0;
 
     // Colour
+    rp->color_slot = 0xFF;   // default: use color_idx (literal), not a slot
     if (p["color"].is<JsonObject>() && p["color"]["slot"].is<const char*>()) {
       JsonObject c = p["color"];
       int sidx = resolveSlotIndex(rootState, c["slot"]);
