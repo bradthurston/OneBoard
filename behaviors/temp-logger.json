@@ -1,0 +1,33 @@
+{
+  "id": "temp-logger",
+  "name": "Temp Logger",
+  "layout": "fullscreen",
+  "state": [
+    {"name": "temp",       "type": "float", "init": 72.0},
+    {"name": "last_tick",  "type": "int64", "init": 0},
+    {"name": "sample_idx", "type": "int64", "init": 0},
+    {"name": "sample_cnt", "type": "int64", "init": 0},
+    {"name": "graph_w",    "type": "int64", "init": 220}
+  ],
+  "on_tick": "tick",
+  "behaviors": {
+    "tick": [
+      {"v": "if", "args": ["state.last_tick", "stale_250ms"], "then": [
+        {"v": "stamp", "args": ["state.last_tick"]},
+        {"v": "add", "args": ["state.temp", {"v": "noise", "args": ["-2.0", "2.0"]}]},
+        {"v": "if", "args": ["state.temp", "clamp_60_90"], "then": []},
+        {"v": "render", "args": ["clear", {"color": "black"}]},
+        {"v": "render", "args": ["text", {"x": 80, "y": 40, "src": "Temp Logger", "font": 2, "color": "yellow"}]},
+        {"v": "render", "args": ["text", {"x": 70, "y": 70, "src": "format_temp(state.temp)", "font": 4, "color": "cyan"}]},
+        {"v": "render", "args": ["rect", {"x": 10, "y": 100, "w": 220, "h": 180, "color": "darkgrey"}]},
+        {"v": "render", "args": ["text", {"x": 215, "y": 100, "src": "90F", "font": 1, "color": "white"}]},
+        {"v": "render", "args": ["text", {"x": 215, "y": 270, "src": "60F", "font": 1, "color": "white"}]},
+        {"v": "graph", "args": ["state.temp", {}]},
+        {"v": "add", "args": ["state.sample_idx", {"v": "lit", "args": "1"}]},
+        {"v": "if", "args": ["state.sample_cnt", "lt_100"], "then": [
+          {"v": "add", "args": ["state.sample_cnt", {"v": "lit", "args": "1"}]}
+        ]}
+      ]}
+    ]
+  }
+}

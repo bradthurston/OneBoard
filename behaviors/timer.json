@@ -1,0 +1,26 @@
+{
+  "id": "timer",
+  "name": "Count-Up Timer",
+  "layout": "fullscreen",
+  "state": [
+    {"name": "elapsed_ms", "type": "int64", "init": 0},
+    {"name": "running",    "type": "bool",  "init": true}
+  ],
+  "on_tick": "tick",
+  "on_touch": "on_touch",
+  "behaviors": {
+    "tick": [
+      {"v": "if", "args": ["state.running", "is_true"], "then": [
+        {"v": "add", "args": ["state.elapsed_ms", {"v": "lit", "args": "1000"}]},
+        {"v": "render", "args": ["clear", {"color": "black"}]},
+        {"v": "render", "args": ["text", {"x": 20, "y": 60, "src": "Timer", "font": 2, "color": "yellow"}]},
+        {"v": "render", "args": ["text", {"x": 50, "y": 110, "src": "format_ms(state.elapsed_ms)", "font": 6, "color": "green"}]},
+        {"v": "render", "args": ["bar", {"x": 10, "y": 170, "w": "progress_bar(state.elapsed_ms)", "h": 10, "color": "blue"}]},
+        {"v": "render", "args": ["text", {"x": 30, "y": 210, "src": "Touch to pause/resume", "font": 2, "color": "white"}]}
+      ]}
+    ],
+    "on_touch": [
+      {"v": "toggle", "args": ["state.running"]}
+    ]
+  }
+}
