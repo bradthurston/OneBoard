@@ -40,11 +40,15 @@ with no reflash.
   board's own WiFi AP. No interpreter yet — a controlled cheat that proves the control +
   persistence + hardware-test loop. **Built, compiled clean, committed; awaiting Brad's flash
   test on real hardware** (the only remaining verification — an agent can't flash).
-- **Stage 2 (NEXT)**: Behavior-store over WiFi. Tool definitions live as JSON on the machine;
-  board loads them over the network. Tools become *data*, modified without touching firmware.
-  Rides on Stage 1's control layer.
-- **Stage 3**: The real interpreter — a 20-30 verb VM running the behavior definitions on
-  ~300KB SRAM. The seasonal hard core.
+- **Stage 2 (DONE — contract-conformant)**: Behavior-store over WiFi. Tool definitions live as
+  JSON on the machine; board loads them over the network. Tools become *data*, modified without
+  touching firmware. Rides on Stage 1's control layer. **Built (`79803f4`), then reconciled to the
+  8-point contract below (`7ed8043`)** — schema == execution model now (slot refs, structured
+  guards, first-match-guard-wins events, touch regions, named timers). `pio run` SUCCESS (79.4%
+  flash, 14.8% RAM). **Awaiting Brad's flash test on hardware** to confirm visuals.
+- **Stage 3 (NEXT)**: The real interpreter — a 20-30 verb VM running the behavior definitions on
+  ~300KB SRAM. The seasonal hard core. Because Stage 2's schema now matches the contract, Stage 3
+  compiles the SAME JSON to compact instructions at load — no format change, no retrofit.
 - **Stage 4+ (stretch)**: Agentic behavior authoring — an LLM writes behavior definitions
   directly; boards self-describe so any client renders them. Full "canvas" status.
 
