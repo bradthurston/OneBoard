@@ -1038,7 +1038,11 @@ void vmRender(VmState* state, const VmProgram* prog, TFT_eSPI* tft) {
         uint8_t f = rp->font;
         if (f < 1) f = 2;
         if (f > 7) f = 7;
-        tft->setTextColor(color, TFT_BLACK);
+        // Single-arg setTextColor = transparent background (textcolor==textbgcolor),
+        // so glyphs draw over whatever is behind them. The two-arg form
+        // setTextColor(color, TFT_BLACK) painted a black box behind EVERY text,
+        // invisible on a black screen but a black rectangle over colored buttons.
+        tft->setTextColor(color);
         if (rp->center) {
           // x is the horizontal centre; MC_DATUM anchors centre of text
           tft->setTextDatum(MC_DATUM);
