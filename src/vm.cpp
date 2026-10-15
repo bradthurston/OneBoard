@@ -252,6 +252,21 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     return 1;
   }
 
+  // --- random ---
+  if (verb.containsKey("random")) {
+    JsonObject p = verb["random"];
+    const char* slotName = p["slot"];
+    int idx = resolveSlotIndex(rootState, slotName);
+    if (idx < 0) return 0;
+    instr->op = OP_RAND;
+    instr->dst = (uint8_t)idx;
+    // min -> a_val, max -> b_val (plain literal values)
+    instr->a_val = (int32_t)(p["min"] | (int64_t)1);
+    instr->b_val = (int32_t)(p["max"] | (int64_t)6);
+    prog->instr_count++;
+    return 1;
+  }
+
   // --- now_minus ---
   if (verb.containsKey("now_minus")) {
     JsonObject p = verb["now_minus"];
@@ -735,6 +750,19 @@ static int execInstr(VmState* state, const VmProgram* prog,
         state->fval[instr->dst] += noise;
       else
         state->ival[instr->dst] += (int64_t)noise;
+      return 1;
+    }
+
+    case OP_RAND: {
+      // dst = random(a_val..b_val) inclusive — standalone (e.g. dice)
+      int32_t lo = instr->a_val;
+      int32_t hi = instr->b_val;
+      if (hi < lo) { int32_t t = lo; lo = hi; hi = t; }
+      int32_t v = lo + (int32_t)((uint32_t)random(0, (uint32_t)(hi - lo + 1)));
+      if (state->types[instr->dst] == SLOT_FLOAT)
+        state->fval[instr->dst] = (float)v;
+      else
+        state->ival[instr->dst] = (int64_t)v;
       return 1;
     }
 

@@ -399,7 +399,7 @@ void handleSchema() {
     "\"board\":\"CYD ESP32-2432S028\",\"display\":\"240x320\","
     "\"slots\":{\"types\":[\"int64\",\"float\",\"bool\",\"string\"],\"max\":12},"
     "\"verbs\":[\"add\",\"sub\",\"set\",\"setf\",\"toggle\",\"stamp\","
-      "\"now_minus\",\"format\",\"progress\",\"render\",\"if\"],"
+      "\"random\",\"now_minus\",\"format\",\"progress\",\"render\",\"if\"],"
     "\"guards\":[\"eq\",\"ne\",\"lt\",\"le\",\"gt\",\"ge\",\"is_true\","
       "\"elapsed_ge\",\"always\"],"
     "\"render_types\":[\"clear\",\"text\",\"rect\",\"fillrect\",\"line\","

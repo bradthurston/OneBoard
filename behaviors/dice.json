@@ -1,0 +1,27 @@
+{
+  "id": "dice",
+  "name": "Dice Roller",
+  "layout": "fullscreen",
+  "state": [
+    {"name": "value", "type": "int64", "init": 1},
+    {"name": "value_txt", "type": "string", "init": "1"}
+  ],
+  "events": [
+    {
+      "name": "touch-down",
+      "handlers": [
+        {
+          "guard": {"op": "always"},
+          "run": [
+            {"random": {"slot": "value", "min": {"lit": 1}, "max": {"lit": 6}}},
+            {"format": {"slot": "value_txt", "op": "int", "src": {"slot": "value"}}},
+            {"render": {"type": "clear", "color": "black"}},
+            {"render": {"type": "text", "x": {"lit": 120}, "y": {"lit": 100}, "src": {"lit": "Dice Roller"}, "font": {"lit": 2}, "color": "yellow", "center": true}},
+            {"render": {"type": "text", "x": {"lit": 120}, "y": {"lit": 150}, "src": {"slot": "value_txt"}, "font": {"lit": 6}, "color": "white", "center": true}},
+            {"render": {"type": "text", "x": {"lit": 120}, "y": {"lit": 260}, "src": {"lit": "Tap to roll"}, "font": {"lit": 2}, "color": "cyan", "center": true}}
+          ]
+        }
+      ]
+    }
+  ]
+}

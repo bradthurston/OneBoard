@@ -1,0 +1,210 @@
+{
+  "id": "stopwatch",
+  "name": "Stopwatch",
+  "layout": "fullscreen",
+  "state": [
+    {
+      "name": "running",
+      "type": "bool",
+      "init": false
+    },
+    {
+      "name": "start_stamp",
+      "type": "int64",
+      "init": 0
+    },
+    {
+      "name": "elapsed_ms",
+      "type": "int64",
+      "init": 0
+    },
+    {
+      "name": "display",
+      "type": "string",
+      "init": "00:00"
+    }
+  ],
+  "events": [
+    {
+      "name": "tick",
+      "schedule": {"type": "interval", "ms": 100},
+      "handlers": [
+        {
+          "guard": {"op": "is_true", "a": {"slot": "running"}},
+          "run": [
+            {"now_minus": {"slot": "elapsed_ms", "from": {"slot": "start_stamp"}}},
+            {"format": {"slot": "display", "op": "ms", "src": {"slot": "elapsed_ms"}}},
+            {"render": {"type": "clear", "color": "black"}},
+            {"render": {"type": "text", "x": {"lit": 120}, "y": {"lit": 120}, "src": {"slot": "display"}, "font": {"lit": 6}, "color": "white", "center": true}},
+            {"render": {"type": "text", "x": {"lit": 120}, "y": {"lit": 200}, "src": {"lit": "TAP TO STOP"}, "font": {"lit": 2}, "color": "green", "center": true}}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "touch-down",
+      "handlers": [
+        {
+          "guard": {
+            "op": "is_true",
+            "a": {
+              "slot": "running"
+            }
+          },
+          "run": [
+            {
+              "set": {
+                "slot": "running",
+                "value": {
+                  "lit": false
+                }
+              }
+            },
+            {
+              "now_minus": {
+                "slot": "elapsed_ms",
+                "from": {
+                  "slot": "start_stamp"
+                }
+              }
+            },
+            {
+              "format": {
+                "slot": "display",
+                "op": "ms",
+                "src": {
+                  "slot": "elapsed_ms"
+                }
+              }
+            },
+            {
+              "render": {
+                "type": "clear",
+                "color": "black"
+              }
+            },
+            {
+              "render": {
+                "type": "text",
+                "x": {
+                  "lit": 120
+                },
+                "y": {
+                  "lit": 120
+                },
+                "src": {
+                  "slot": "display"
+                },
+                "font": {
+                  "lit": 6
+                },
+                "color": "white",
+                "center": true
+              }
+            },
+            {
+              "render": {
+                "type": "text",
+                "x": {
+                  "lit": 120
+                },
+                "y": {
+                  "lit": 200
+                },
+                "src": {
+                  "lit": "TAP TO RESET"
+                },
+                "font": {
+                  "lit": 2
+                },
+                "color": "yellow",
+                "center": true
+              }
+            }
+          ]
+        },
+        {
+          "guard": {
+            "op": "always"
+          },
+          "run": [
+            {
+              "set": {
+                "slot": "running",
+                "value": {
+                  "lit": true
+                }
+              }
+            },
+            {
+              "stamp": {
+                "slot": "start_stamp"
+              }
+            },
+            {
+              "set": {
+                "slot": "elapsed_ms",
+                "value": {
+                  "lit": 0
+                }
+              }
+            },
+            {
+              "format": {
+                "slot": "display",
+                "op": "ms",
+                "src": {
+                  "slot": "elapsed_ms"
+                }
+              }
+            },
+            {
+              "render": {
+                "type": "clear",
+                "color": "black"
+              }
+            },
+            {
+              "render": {
+                "type": "text",
+                "x": {
+                  "lit": 120
+                },
+                "y": {
+                  "lit": 120
+                },
+                "src": {
+                  "slot": "display"
+                },
+                "font": {
+                  "lit": 6
+                },
+                "color": "white",
+                "center": true
+              }
+            },
+            {
+              "render": {
+                "type": "text",
+                "x": {
+                  "lit": 120
+                },
+                "y": {
+                  "lit": 200
+                },
+                "src": {
+                  "lit": "TAP TO STOP"
+                },
+                "font": {
+                  "lit": 2
+                },
+                "color": "green",
+                "center": true
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

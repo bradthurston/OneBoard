@@ -59,8 +59,9 @@ every value references one of these slots.
 | `add`/`sub` | `{"slot": n, "delta": {"lit": 1000}}` | `delta` may be `{"noise":{"lo":-2,"hi":2}}` (re-sampled every tick) |
 | `set`/`setf` | `{"slot": n, "value": {...}}` | `setf` for floats |
 | `toggle` | `{"slot": n}` | bool flip |
-| `stamp` | `{"slot": n}` | n = now (ms) |
-| `now_minus` | `{"slot": n, "from": {...}}` | n = now - from |
+| `stamp` | `{slot}` | slot = now (ms) |
+| `random` | `{slot, min, max}` | slot = random int in [min,max] inclusive (e.g. dice 1-6) |
+| `now_minus` | `{slot, from}` | slot = now - from |
 | `format` | `{"slot": str, "op": "ms"\|"temp"\|"react"\|"int", "src": {...}}` | builds display string |
 | `progress` | `{"slot": w, "src": {...}, "max": {...}, "px": {...}}` | w = progress in px |
 | `render` | see below | draw a primitive |

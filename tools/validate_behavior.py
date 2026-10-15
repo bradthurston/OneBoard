@@ -19,7 +19,7 @@ import json
 import sys
 
 # --- Vocabulary (mirrors src/vm.cpp — keep in sync) ---
-VERBS = {"add", "sub", "set", "setf", "toggle", "stamp", "now_minus",
+VERBS = {"add", "sub", "set", "setf", "toggle", "stamp", "now_minus", "random",
          "format", "progress", "render", "if"}
 RENDER_TYPES = {"clear", "text", "rect", "fillrect", "line", "circle",
                 "bar", "graph"}
@@ -189,6 +189,8 @@ class Behavior:
             self._check_slot_ref(p.get("slot"), f"event '{ev_name}' toggle.slot")
         elif vname in ("stamp", "now_minus"):
             self._check_stamp(ev_name, vname, p)
+        elif vname == "random":
+            self._check_random(ev_name, p)
         elif vname == "progress":
             self._check_progress(ev_name, p)
 
@@ -237,6 +239,12 @@ class Behavior:
         self._check_slot_ref(p.get("slot"), f"event '{ev_name}' {vname}.slot")
         if vname == "now_minus" and "from" in p:
             self._check_value(p["from"], f"event '{ev_name}' now_minus.from")
+
+    def _check_random(self, ev_name, p):
+        self._check_slot_ref(p.get("slot"), f"event '{ev_name}' random.slot")
+        for k in ("min", "max"):
+            if k in p:
+                self._check_value(p[k], f"event '{ev_name}' random.{k}")
 
     def _check_progress(self, ev_name, p):
         self._check_slot_ref(p.get("slot"), f"event '{ev_name}' progress.slot")

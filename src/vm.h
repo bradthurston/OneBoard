@@ -54,7 +54,8 @@ enum VmOp : uint8_t {
   OP_TOGGLE,     // dst = !dst
   OP_STAMP,      // dst = millis()
   OP_NOW_MINUS,  // dst = millis() - a
-  OP_NOISE,      // dst = random(a_val..b_val)
+  OP_NOISE,      // dst += random(a_val..b_val)  (additive, for temp-logger)
+  OP_RAND,       // dst = random(a_val..b_val)   (standalone, inclusive)
 
   // --- Formatting (write to string dst slot) ---
   OP_FMT_MS,     // dst = format_ms(a) e.g. "01:23"
