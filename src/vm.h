@@ -210,6 +210,10 @@ struct VmState {
   int     graph_head;
   int     graph_count;
 
+  // Render dirty bitmap — which render primitives to draw this frame
+  // (set by OP_RENDER when a handler executes; vmRender draws only these)
+  uint32_t render_dirty;
+
   // Per-event timer tracking
   unsigned long event_last[VM_MAX_EVENTS];
 };
@@ -227,7 +231,8 @@ bool vmCompile(const JsonObject& root, VmProgram* prog);
 void vmStateInit(VmState* state, const VmProgram* prog);
 
 // Check scheduled events and execute if due. Call from loop().
-void vmTick(VmState* state, const VmProgram* prog, unsigned long now);
+// Returns true if any handler executed (caller should redraw).
+bool vmTick(VmState* state, const VmProgram* prog, unsigned long now);
 
 // Dispatch a named event (e.g. "touch-down"). Returns true if handled.
 bool vmDispatch(VmState* state, const VmProgram* prog, const char* eventName);

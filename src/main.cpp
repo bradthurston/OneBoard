@@ -450,11 +450,10 @@ void loop() {
   unsigned long now = millis();
 
   if (vmInitialized) {
-    // Run scheduled events (ticks)
-    vmTick(&g_state, &g_prog, now);
-
-    // Draw all render primitives
-    vmRender(&g_state, &g_prog, &tft);
+    // Run scheduled events (ticks); redraw only when something actually ran
+    // (Stage 2 behavior — a tick or touch re-renders; no idle redraw storm).
+    bool ran = vmTick(&g_state, &g_prog, now);
+    if (ran) vmRender(&g_state, &g_prog, &tft);
   }
 
   /* Touch → named event "touch-down" (edge-detected, 250ms cooldown).
@@ -469,7 +468,8 @@ void loop() {
   if (touched && !touchWasDown && (tNow - lastTouchEventMs > 250)) {
     lastTouchEventMs = tNow;
     if (vmInitialized) {
-      vmDispatch(&g_state, &g_prog, "touch-down");
+      if (vmDispatch(&g_state, &g_prog, "touch-down"))
+        vmRender(&g_state, &g_prog, &tft);
     }
   }
   touchWasDown = touched;

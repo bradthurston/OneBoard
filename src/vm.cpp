@@ -367,6 +367,9 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     if (p["src"].is<JsonObject>() && p["src"]["slot"].is<const char*>()) {
       int si = resolveSlotIndex(rootState, p["src"]["slot"]);
       if (si >= 0) rp->src_slot = (uint8_t)si;
+    } else if (p["src"].is<JsonObject>() && p["src"]["lit"].is<const char*>()) {
+      strncpy(rp->text, p["src"]["lit"], VM_STR_LEN - 1);
+      rp->src_slot = 0xFF;
     } else if (p["src"].is<const char*>()) {
       strncpy(rp->text, p["src"], VM_STR_LEN - 1);
       rp->src_slot = 0xFF;
@@ -377,7 +380,18 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     }
 
     // Font
-    rp->font = (uint8_t)(p["font"] | 2);
+    uint8_t fontVal = 2;
+    JsonVariant fv = p["font"];
+    if (fv.is<JsonObject>()) {
+      if (fv["lit"].is<const char*>()) fontVal = (uint8_t)atoi(fv["lit"]);
+      else if (fv["lit"].is<int64_t>()) fontVal = (uint8_t)(int64_t)fv["lit"];
+      else if (fv["lit"].is<int>()) fontVal = (uint8_t)(int)fv["lit"];
+    } else if (fv.is<int64_t>()) {
+      fontVal = (uint8_t)(int64_t)fv;
+    } else if (fv.is<const char*>()) {
+      fontVal = (uint8_t)atoi(fv);
+    }
+    rp->font = fontVal;
     if (rp->font < 1) rp->font = 2;
     if (rp->font > 7) rp->font = 7;
 
@@ -729,7 +743,8 @@ static int execInstr(VmState* state, const VmProgram* prog,
     }
 
     case OP_RENDER:
-      // Rendering is deferred — vmRender() draws everything
+      // Mark this render primitive dirty — vmRender() draws only dirty ones
+      state->render_dirty |= (1u << instr->dst);
       return 1;
 
     case OP_IF: {
@@ -769,8 +784,10 @@ static void execRange(VmState* state, const VmProgram* prog,
 
 // ============================================================
 // Public API: vmTick — check scheduled events, execute if due
+// Returns true if any handler executed (caller should redraw)
 // ============================================================
-void vmTick(VmState* state, const VmProgram* prog, unsigned long now) {
+bool vmTick(VmState* state, const VmProgram* prog, unsigned long now) {
+  bool ran = false;
   for (uint8_t ei = 0; ei < prog->event_count; ei++) {
     const VmEvent* ev = &prog->events[ei];
     if (ev->interval_ms <= 0) continue; // not scheduled (touch-only)
@@ -786,10 +803,12 @@ void vmTick(VmState* state, const VmProgram* prog, unsigned long now) {
 
         // Execute this handler's block
         execRange(state, prog, h->instr_start, h->instr_count, now);
+        ran = true;
         break; // first match wins
       }
     }
   }
+  return ran;
 }
 
 // ============================================================
@@ -822,6 +841,8 @@ bool vmDispatch(VmState* state, const VmProgram* prog, const char* eventName) {
 // ============================================================
 void vmRender(VmState* state, const VmProgram* prog, TFT_eSPI* tft) {
   for (uint8_t i = 0; i < prog->render_count; i++) {
+    // Only draw primitives whose handler executed this frame
+    if (!(state->render_dirty & (1u << i))) continue;
     const RenderPrim* rp = &prog->renders[i];
 
     // Resolve colour
@@ -918,6 +939,7 @@ void vmRender(VmState* state, const VmProgram* prog, TFT_eSPI* tft) {
       }
     }
   }
+  state->render_dirty = 0;   // consume the dirty set — next frame only what runs
 }
 
 // ============================================================
