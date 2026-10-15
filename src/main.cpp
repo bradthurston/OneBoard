@@ -17,6 +17,84 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
+#include <SPI.h>
+
+/* ==========================================================
+   XPT2046 touch — SEPARATE SPI instance (VSPI), independent of the TFT (HSPI).
+   E32R28T/2432S028R: SCLK25 MOSI32 MISO39 CS33 IRQ36 (manufacturer pinout).
+   Uses the same raw sampling protocol as TFT_eSPI's Touch.cpp but on its own bus.
+   ========================================================== */
+SPIClass touchSPI(VSPI);
+#define TOUCH_SCLK 25
+#define TOUCH_MOSI 32
+#define TOUCH_MISO 39
+#define TOUCH_CS   33
+#define TOUCH_IRQ  36
+#define Z_THRESHOLD 350
+#define TOUCH_FREQ  2500000
+
+void touchBegin() {
+  touchSPI.begin(TOUCH_SCLK, TOUCH_MISO, TOUCH_MOSI, TOUCH_CS);
+  pinMode(TOUCH_CS, OUTPUT);
+  digitalWrite(TOUCH_CS, HIGH);
+  pinMode(TOUCH_IRQ, INPUT);
+}
+
+static uint16_t touchReadZ() {
+  touchSPI.beginTransaction(SPISettings(TOUCH_FREQ, MSBFIRST, SPI_MODE0));
+  digitalWrite(TOUCH_CS, LOW);
+  int16_t tz = 0xFFF;
+  touchSPI.transfer(0xb0);               // start Z1
+  tz += touchSPI.transfer16(0xc0) >> 3;  // read Z1, start Z2
+  tz -= touchSPI.transfer16(0x00) >> 3;  // read Z2
+  digitalWrite(TOUCH_CS, HIGH);
+  touchSPI.endTransaction();
+  if (tz == 4095) tz = 0;
+  return (uint16_t)tz;
+}
+
+static void touchReadRaw(uint16_t *x, uint16_t *y) {
+  touchSPI.beginTransaction(SPISettings(TOUCH_FREQ, MSBFIRST, SPI_MODE0));
+  digitalWrite(TOUCH_CS, LOW);
+  uint16_t tmp;
+  // X (YP sample)
+  touchSPI.transfer(0xd0); touchSPI.transfer(0);
+  touchSPI.transfer(0xd0); touchSPI.transfer(0);
+  touchSPI.transfer(0xd0); touchSPI.transfer(0);
+  tmp = touchSPI.transfer(0);
+  tmp = tmp << 5;
+  tmp |= 0x1f & (touchSPI.transfer(0x90) >> 3);
+  *x = tmp;
+  // Y (XP sample)
+  touchSPI.transfer(0); touchSPI.transfer(0x90);
+  touchSPI.transfer(0); touchSPI.transfer(0x90);
+  touchSPI.transfer(0); touchSPI.transfer(0x90);
+  tmp = touchSPI.transfer(0);
+  tmp = tmp << 5;
+  tmp |= 0x1f & (touchSPI.transfer(0) >> 3);
+  *y = tmp;
+  digitalWrite(TOUCH_CS, HIGH);
+  touchSPI.endTransaction();
+}
+
+/* Debounced, double-sampled touch read. Returns true + screen coords (portrait 240x320) on press. */
+static bool touchReadScreen(uint16_t *sx, uint16_t *sy) {
+  uint16_t x1, y1, x2, y2;
+  uint16_t z1 = touchReadZ();
+  if (z1 <= Z_THRESHOLD) return false;
+  touchReadRaw(&x1, &y1);
+  if (touchReadZ() <= Z_THRESHOLD) return false;
+  delay(2);
+  touchReadRaw(&x2, &y2);
+  if (abs((int)x1 - (int)x2) > 20 || abs((int)y1 - (int)y2) > 20) return false;
+  // raw 0..4095 → screen (rotation 0, portrait 240x320). Rough proportional map —
+  // the full-screen region means any in-bounds tap is valid; fine-tune later if needed.
+  *sx = ((uint32_t)(y1 + y2) / 2) * 240 / 4096;
+  *sy = ((uint32_t)(x1 + x2) / 2) * 320 / 4096;
+  if (*sx >= 240) *sx = 239;
+  if (*sy >= 320) *sy = 319;
+  return true;
+}
 
 /* ==========================================================
    Configuration
@@ -779,7 +857,7 @@ void setup() {
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, HIGH);
   tft.init();
-  tft.setRotation(1);
+  tft.setRotation(0);   /* portrait 240x320 — matches the behavior tool definitions */
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString("Stage 2 booting...", 10, 10, 2);
@@ -790,6 +868,7 @@ void setup() {
     LittleFS.begin();
   }
   LittleFS.mkdir("/behaviors/");
+  touchBegin();
 
   storeUrl = loadConfigStr(STORE_KEY, DEFAULT_STORE);
   activeToolId = loadConfigStr(ACTIVE_KEY, DEFAULT_TOOL);
@@ -842,10 +921,11 @@ void loop() {
     }
   }
 
-  /* Touch-down → named event via explicit region */
+  /* Touch-down → named event via explicit region (edge-detected: one event per press) */
+  static bool touchWasDown = false;
   uint16_t tx = 0, ty = 0;
-  bool touched = tft.getTouch(&tx, &ty);
-  if (touched && behaviorLoaded && behaviorRoot["events"]) {
+  bool touched = touchReadScreen(&tx, &ty);
+  if (touched && !touchWasDown && behaviorLoaded && behaviorRoot["events"]) {
     for (JsonObject ev : behaviorRoot["events"].as<JsonArray>()) {
       JsonObject region = ev["region"];
       if (!region) continue;
@@ -858,6 +938,7 @@ void loop() {
       }
     }
   }
+  touchWasDown = touched;
 
   delay(LOOP_DELAY);
 }

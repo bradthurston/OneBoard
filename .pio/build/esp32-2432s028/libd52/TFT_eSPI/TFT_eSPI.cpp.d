@@ -166,12 +166,10 @@
  .pio/libdeps/esp32-2432s028/TFT_eSPI/Fonts/Font32rle.c \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/Fonts/Font64rle.h \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/Fonts/Font64rle.c \
- .pio/libdeps/esp32-2432s028/TFT_eSPI/Extensions/Touch.h \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/Extensions/Button.h \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/Extensions/Sprite.h \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/Processors/TFT_eSPI_ESP32.c \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/TFT_Drivers/ILI9341_Init.h \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/TFT_Drivers/ILI9341_Rotation.h \
- .pio/libdeps/esp32-2432s028/TFT_eSPI/Extensions/Touch.cpp \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/Extensions/Button.cpp \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/Extensions/Sprite.cpp
