@@ -638,21 +638,27 @@ void seedDefaultBehaviors() {
 /* ==========================================================
    WiFi helpers
    ========================================================== */
-void tryStationConnect() {
+bool wifiStationConnect(bool verbose = true) {
   String ssid = loadConfigStr(WIFI_SSID_KEY, "");
   String pass = loadConfigStr(WIFI_PASS_KEY, "");
-  if (ssid.length() == 0) return;
-  Serial.print("WiFi: "); Serial.println(ssid);
+  if (ssid.length() == 0) return false;
+  if (verbose) { Serial.print("WiFi: "); Serial.println(ssid); }
+  WiFi.mode(WIFI_AP_STA);
   WiFi.begin(ssid.c_str(), pass.c_str());
-  for (int i = 0; i < 20 && WiFi.status() != WL_CONNECTED; i++) { delay(500); Serial.print("."); }
-  Serial.println();
+  for (int i = 0; i < 20 && WiFi.status() != WL_CONNECTED; i++) { delay(500); if (verbose) Serial.print("."); }
+  if (verbose) Serial.println();
   if (WiFi.status() == WL_CONNECTED) {
     wifiStationOk = true;
-    Serial.print("IP: "); Serial.println(WiFi.localIP());
-  } else {
-    wifiStationOk = false;
-    Serial.println("WiFi fail — AP fallback");
+    if (verbose) { Serial.print("IP: "); Serial.println(WiFi.localIP()); }
+    return true;
   }
+  wifiStationOk = false;
+  if (verbose) Serial.println("WiFi fail — AP fallback");
+  return false;
+}
+
+void tryStationConnect() {
+  wifiStationConnect(true);
 }
 
 /* ==========================================================
@@ -682,6 +688,15 @@ void handleRoot() {
     "<button id='btn-temp-logger' onclick='loadTool(\"temp-logger\")'>&#127777; Temp Logger</button>"
     "<button id='btn-reaction-game' onclick='loadTool(\"reaction-game\")'>&#9889; Reaction Game</button>"
     "<div style='margin-top:18px;border-top:1px solid #444;padding-top:12px'>"
+      "<div style='font-size:0.9em;color:#9cf;margin-bottom:6px'>WiFi (join your home network)</div>"
+      "<input id='wifiSsid' type='text' style='width:100%;max-width:280px;padding:8px;background:#222;color:#fff;border:1px solid #555'"
+        " placeholder='Home WiFi SSID' />"
+      "<input id='wifiPass' type='password' style='width:100%;max-width:280px;padding:8px;background:#222;color:#fff;border:1px solid #555'"
+        " placeholder='Home WiFi password' />"
+      "<button onclick='setWifi()' style='background:#333;border-color:#9cf'>Join Home WiFi</button>"
+      "<div id='wifiStatus' style='font-size:0.8em;color:#888'></div>"
+    "</div>"
+    "<div style='margin-top:18px;border-top:1px solid #444;padding-top:12px'>"
       "<input id='storeInput' type='text' style='width:100%;max-width:280px;padding:8px;background:#222;color:#fff;border:1px solid #555'"
         " placeholder='Store URL' />"
       "<button onclick='setStore()' style='background:#333;border-color:#4af'>Set Store URL</button>"
@@ -704,9 +719,22 @@ void handleRoot() {
           "if(j.ok)document.getElementById('storeLabel').innerText='Store: '+j.url"
         "}catch(e){alert('Failed')}"
       "}"
+      "async function setWifi(){"
+        "var s=document.getElementById('wifiSsid').value.trim();"
+        "var p=document.getElementById('wifiPass').value;"
+        "if(!s)return;"
+        "var st=document.getElementById('wifiStatus');"
+        "st.innerText='Connecting to '+s+'...';"
+        "try{"
+          "var r=await fetch('/wifi?ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p));"
+          "var j=await r.json();"
+          "if(j.ok){st.innerText='Joined '+s+' — IP: '+j.ip+' (reach the board at http://'+j.ip+' from now on)'}"
+          "else{st.innerText='Failed to join '+s+' — check name/password, AP still up at 192.168.4.1'}"
+        "}catch(e){st.innerText='Failed'}"
+      "}"
       "fetch('/status').then(r=>r.json()).then(j=>{"
         "document.getElementById('current').innerText='Tool: '+j.tool;"
-        "document.getElementById('storeLabel').innerText='Store: '+j.store_url;"
+        "document.getElementById('storeLabel').innerText='Store: '+j.store_url + (j.wifi?' | WiFi IP: '+j.ip:'');"
         "document.getElementById('storeInput').value=j.store_url;"
         "var b=document.getElementById('btn-'+j.tool);"
         "if(b)b.className='active'"
@@ -726,6 +754,24 @@ void handleLoad() {
   server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing id\"}");
 }
 
+void handleWifi() {
+  if (server.hasArg("ssid") && server.hasArg("pass")) {
+    String ssid = server.arg("ssid");
+    String pass = server.arg("pass");
+    saveConfigStr(WIFI_SSID_KEY, ssid.c_str());
+    saveConfigStr(WIFI_PASS_KEY, pass.c_str());
+    bool ok = wifiStationConnect(false);
+    String ip = ok ? WiFi.localIP().toString() : "";
+    String json = "{\"ok\":";
+    json += ok ? "true" : "false";
+    json += ",\"ssid\":\"" + ssid + "\"";
+    json += ",\"ip\":\"" + ip + "\"}";
+    server.send(200, "application/json", json);
+    return;
+  }
+  server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing ssid/pass\"}");
+}
+
 void handleStatus() {
   String json = "{\"tool\":\"";
   json += activeToolId;
@@ -733,7 +779,11 @@ void handleStatus() {
   json += storeUrl;
   json += "\",\"loaded\":";
   json += behaviorLoaded ? "true" : "false";
-  json += "}";
+  json += ",\"wifi\":";
+  json += wifiStationOk ? "true" : "false";
+  json += ",\"ip\":\"";
+  json += wifiStationOk ? WiFi.localIP().toString() : "";
+  json += "\"}";
   server.send(200, "application/json", json);
 }
 
@@ -788,6 +838,7 @@ void setup() {
   server.on("/load",    handleLoad);
   server.on("/status",  handleStatus);
   server.on("/store",   handleStore);
+  server.on("/wifi",    handleWifi);
   server.onNotFound(handleNotFound);
   server.begin();
 
