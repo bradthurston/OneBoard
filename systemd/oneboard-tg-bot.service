@@ -7,9 +7,9 @@ Type=simple
 WorkingDirectory=/home/brad/projects/oneboard
 # Token goes in the EnvironmentFile (NOT this file, and never in chat):
 EnvironmentFile=/home/brad/.hermes/keys/oneboard-telegram.env
-# python-telegram-bot is installed in the Hermes venv (not system python) —
-# use that interpreter so the import resolves outside the interactive shell.
-ExecStart=/home/brad/.hermes/installs/51181f1e9b6ad302/environments/598c85d1a04c41b2acb4162b879c9dc5/venv/bin/python /home/brad/projects/oneboard/tools/oneboard_bot.py
+# Project-local venv (python-telegram-bot) — set up with:
+#   python3 -m venv .venv && .venv/bin/pip install python-telegram-bot
+ExecStart=/home/brad/projects/oneboard/.venv/bin/python /home/brad/projects/oneboard/tools/oneboard_bot.py
 Restart=on-failure
 RestartSec=5
 
