@@ -159,10 +159,12 @@
  /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/esp32/include/soc/rtc_cntl_reg.h \
  /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/esp32/include/soc/rtc_io_reg.h \
  /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/hal/platform_port/include/hal/misc.h \
+ .pio/libdeps/esp32-2432s028/TFT_eSPI/Extensions/Touch.h \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/Extensions/Button.h \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/Extensions/Sprite.h \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/Processors/TFT_eSPI_ESP32.c \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/TFT_Drivers/ILI9341_Init.h \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/TFT_Drivers/ILI9341_Rotation.h \
+ .pio/libdeps/esp32-2432s028/TFT_eSPI/Extensions/Touch.cpp \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/Extensions/Button.cpp \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/Extensions/Sprite.cpp
