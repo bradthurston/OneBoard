@@ -320,6 +320,19 @@ void renderGraph(JsonObject p) {
    ========================================================== */
 void execBlock(JsonArray block);
 
+/* True if the named state slot is declared as type "float" in the behavior def. */
+static bool slotIsFloat(const char* name) {
+  JsonArray defs = behaviorRoot["state"];
+  if (!defs) return false;
+  for (JsonObject s : defs) {
+    if (s["name"] && strcmp(s["name"], name) == 0) {
+      const char* ty = s["type"] | "int64";
+      return (strcmp(ty, "float") == 0);
+    }
+  }
+  return false;
+}
+
 void execVerb(JsonObject verb) {
   if (!verb) return;
 
@@ -328,10 +341,14 @@ void execVerb(JsonObject verb) {
     JsonObject p = verb["add"];
     const char* name = p["slot"];
     if (name) {
-      JsonVariant cur = stateRoot[name];
       float delta = varFloat(p["delta"]);
-      if (cur.is<float>()) stateRoot[name] = (float)cur + delta;
-      else                 stateRoot[name] = (int64_t)(stateRoot[name] | (int64_t)0) + (int64_t)delta;
+      if (slotIsFloat(name)) {
+        float nv = (stateRoot[name] | 0.0f) + delta;
+        stateRoot[name] = nv;
+      } else {
+        int64_t nv = (int64_t)(stateRoot[name] | (int64_t)0) + (int64_t)delta;
+        stateRoot[name] = nv;
+      }
     }
     return;
   }
@@ -340,7 +357,10 @@ void execVerb(JsonObject verb) {
   if (verb.containsKey("sub")) {
     JsonObject p = verb["sub"];
     const char* name = p["slot"];
-    if (name) stateRoot[name] = (int64_t)(stateRoot[name] | (int64_t)0) - (int64_t)varInt(p["delta"]);
+    if (name) {
+      int64_t nv = (int64_t)(stateRoot[name] | (int64_t)0) - (int64_t)varInt(p["delta"]);
+      stateRoot[name] = nv;
+    }
     return;
   }
 

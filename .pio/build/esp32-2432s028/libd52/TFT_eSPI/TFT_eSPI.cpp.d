@@ -159,6 +159,13 @@
  /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/esp32/include/soc/rtc_cntl_reg.h \
  /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/esp32/include/soc/rtc_io_reg.h \
  /home/brad/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/hal/platform_port/include/hal/misc.h \
+ .pio/libdeps/esp32-2432s028/TFT_eSPI/Fonts/glcdfont.c \
+ .pio/libdeps/esp32-2432s028/TFT_eSPI/Fonts/Font16.h \
+ .pio/libdeps/esp32-2432s028/TFT_eSPI/Fonts/Font16.c \
+ .pio/libdeps/esp32-2432s028/TFT_eSPI/Fonts/Font32rle.h \
+ .pio/libdeps/esp32-2432s028/TFT_eSPI/Fonts/Font32rle.c \
+ .pio/libdeps/esp32-2432s028/TFT_eSPI/Fonts/Font64rle.h \
+ .pio/libdeps/esp32-2432s028/TFT_eSPI/Fonts/Font64rle.c \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/Extensions/Touch.h \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/Extensions/Button.h \
  .pio/libdeps/esp32-2432s028/TFT_eSPI/Extensions/Sprite.h \
