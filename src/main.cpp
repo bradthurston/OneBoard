@@ -1,6 +1,13 @@
 /* ==========================================================
-   OneBoard Stage 2 — Behavior Store over WiFi
-   Tools as JSON data; verb interpreter dispatches behaviors
+   OneBoard Stage 2 — Behavior Store over WiFi (contract-conformant)
+   Behavior-definition schema follows the 8-point contract
+   (docs/GPT-HANDOFF.md, schema of record):
+     - {"slot":"name"} for state refs; literals everywhere else
+     - guards = structured comparisons ({"op":...,"a":...,"b":...}), never string-eval
+     - named events, ordered handlers, first-match-guard-wins
+     - explicit touch regions emitting a named event
+     - bounded scheduled events (named timer ids, same-id-replaces)
+     - straight-line verb lists; no loops/recursion/calls in data
    ========================================================== */
 #include <Arduino.h>
 #include <TFT_eSPI.h>
@@ -30,11 +37,11 @@
 #define DEFAULT_TOOL    "timer"
 
 /* Timing */
-#define TICK_MS         1000
 #define LOOP_DELAY      5
 
 #define BEHAVIOR_DIR    "/behaviors/"
 #define JSON_CAPACITY   8192
+#define MAX_EVENTS      8
 
 /* ==========================================================
    Globals
@@ -43,10 +50,8 @@ TFT_eSPI      tft = TFT_eSPI();
 WebServer     server(80);
 Preferences   prefs;
 bool          wifiStationOk  = false;
-unsigned long lastTickMs     = 0;
 
 String        activeToolId   = DEFAULT_TOOL;
-bool          toolChanged    = true;
 bool          behaviorLoaded = false;
 JsonDocument  behaviorDoc;
 JsonObject    behaviorRoot;
@@ -54,6 +59,11 @@ JsonDocument  stateDoc;
 JsonObject    stateRoot;
 
 String storeUrl = DEFAULT_STORE;
+
+/* Per-event last-fire timers (bounded named timers; same-id replaces on reload) */
+struct EventTimer { const char* name; unsigned long last; };
+EventTimer evTimers[MAX_EVENTS];
+int        evTimerCount = 0;
 
 /* ==========================================================
    NVS config helpers
@@ -94,351 +104,355 @@ static uint16_t resolveColour(const char* name) {
 }
 
 /* ==========================================================
+   Value resolution — {"slot":"name"} | {"lit":X} | {"noise":{lo,hi}} | literal
+   ========================================================== */
+static JsonVariant resolveVar(JsonVariant v) {
+  if (v.is<JsonObject>()) {
+    if (v["slot"].is<const char*>()) return stateRoot[v["slot"].as<const char*>()];
+    if (v.containsKey("lit"))        return v["lit"];
+  }
+  return v;
+}
+
+static float varFloat(JsonVariant v); // forward decl (varInt uses it for noise)
+
+static int64_t varInt(JsonVariant v) {
+  if (v.is<JsonObject>()) {
+    if (v["slot"].is<const char*>()) return (int64_t)(stateRoot[v["slot"].as<const char*>()] | (int64_t)0);
+    if (v.containsKey("lit"))        return varInt(v["lit"]);
+    if (v.containsKey("noise")) {
+      JsonObject n = v["noise"];
+      int lo = (int)varFloat(n["lo"]), hi = (int)varFloat(n["hi"]);
+      return (int64_t)random(lo, hi);
+    }
+  }
+  if (v.isNull()) return 0;
+  return (int64_t)(v | (int64_t)0);
+}
+
+static float varFloat(JsonVariant v) {
+  if (v.is<JsonObject>()) {
+    if (v["slot"].is<const char*>()) return stateRoot[v["slot"].as<const char*>()] | 0.0f;
+    if (v.containsKey("lit"))        return varFloat(v["lit"]);
+    if (v.containsKey("noise")) {
+      JsonObject n = v["noise"];
+      float lo = n["lo"] | -2.0f, hi = n["hi"] | 2.0f;
+      return ((float)random(0, 100) / 100.0f) * (hi - lo) + lo;
+    }
+  }
+  if (v.isNull()) return 0.0f;
+  return v | 0.0f;
+}
+
+static bool varBool(JsonVariant v) {
+  if (v.is<JsonObject>()) {
+    if (v["slot"].is<const char*>()) return (bool)(stateRoot[v["slot"].as<const char*>()] | false);
+    if (v.containsKey("lit"))        return varBool(v["lit"]);
+  }
+  if (v.isNull()) return false;
+  return (bool)(v | false);
+}
+
+static String varStr(JsonVariant v) {
+  if (v.is<JsonObject>()) {
+    if (v["slot"].is<const char*>()) {
+      JsonVariant slot = stateRoot[v["slot"].as<const char*>()];
+      if (slot.is<const char*>()) return String((const char*)slot);
+      if (slot.is<float>())       { char b[16]; snprintf(b, sizeof(b), "%.1f", (float)slot); return String(b); }
+      return String((int64_t)(slot | (int64_t)0));
+    }
+    if (v.containsKey("lit")) return varStr(v["lit"]);
+  }
+  if (v.is<const char*>()) return String((const char*)v);
+  if (v.is<float>())       { char b[16]; snprintf(b, sizeof(b), "%.1f", (float)v); return String(b); }
+  if (v.isNull()) return "";
+  return String((int64_t)(v | (int64_t)0));
+}
+
+static bool varEq(JsonVariant a, JsonVariant b) {
+  a = resolveVar(a); b = resolveVar(b);
+  if (a.is<const char*>() || b.is<const char*>()) return varStr(a) == varStr(b);
+  return varFloat(a) == varFloat(b);
+}
+
+/* ==========================================================
    State management
    ========================================================== */
 void initStateFromDef() {
   JsonArray defs = behaviorRoot["state"];
-  if (!defs) return;
   stateDoc.clear();
   stateRoot = stateDoc.to<JsonObject>();
+  if (!defs) return;
   for (JsonObject slot : defs) {
     const char* n  = slot["name"];
     const char* ty = slot["type"];
     if (!n || !ty) continue;
-    if      (strcmp(ty, "int64") == 0) stateRoot[n] = (int64_t)(slot["init"] | 0);
-    else if (strcmp(ty, "bool")  == 0) stateRoot[n] = (bool)(slot["init"] | false);
-    else if (strcmp(ty, "float") == 0) stateRoot[n] = slot["init"].is<float>() ? (float)slot["init"] : 0.0f;
+    if      (strcmp(ty, "int64")  == 0) stateRoot[n] = (int64_t)(slot["init"] | 0);
+    else if (strcmp(ty, "bool")   == 0) stateRoot[n] = (bool)(slot["init"] | false);
+    else if (strcmp(ty, "float")  == 0) stateRoot[n] = slot["init"].is<float>() ? (float)slot["init"] : 0.0f;
+    else if (strcmp(ty, "string") == 0) stateRoot[n] = slot["init"] | "";
     else                               stateRoot[n] = (int64_t)(slot["init"] | 0);
   }
 }
 
-/* ==========================================================
-   Expression evaluators
-   ========================================================== */
-static String stripState(const char* key) {
-  String s(key); s.trim();
-  if (s.startsWith("state.")) s = s.substring(6);
-  s.trim(); return s;
-}
-
-static int64_t stateInt(const char* key) {
-  String k = stripState(key);
-  if (!k.length()) return 0;
-  return stateRoot[k.c_str()] | (int64_t)0;
-}
-
-static float stateFloat(const char* key) {
-  String k = stripState(key);
-  if (!k.length()) return 0.0f;
-  float v = stateRoot[k.c_str()];
-  return v;
-}
-
-static bool stateBool(const char* key) {
-  String k = stripState(key);
-  if (!k.length()) return false;
-  return (bool)(stateRoot[k.c_str()] | false);
-}
-
-static void stateSet(const char* key, int64_t val) {
-  stateRoot[stripState(key).c_str()] = val;
-}
-
-static void stateSetF(const char* key, float val) {
-  stateRoot[stripState(key).c_str()] = val;
-}
-
-/* Find first '(' in string, or -1 */
-static int findParen(const char* s) {
-  for (int i = 0; s[i]; i++) if (s[i] == '(') return i;
-  return -1;
-}
-
-int64_t evalInt(const char* expr) {
-  if (!expr || !expr[0]) return 0;
-  int p = findParen(expr);
-  if (p > 0 && expr[strlen(expr)-1] == ')') {
-    String fn = String(expr).substring(0, p);
-    String in = String(expr).substring(p+1, strlen(expr)-1); in.trim();
-    if (fn == "progress_bar") {
-      int64_t el = evalInt(in.c_str());
-      return (el % 3600000L) * 220L / 3600000L;
+void resetEventTimers() {
+  evTimerCount = 0;
+  if (!behaviorRoot["events"]) return;
+  for (JsonObject ev : behaviorRoot["events"].as<JsonArray>()) {
+    const char* nm = ev["name"];
+    if (nm && evTimerCount < MAX_EVENTS) {
+      evTimers[evTimerCount].name = strdup(nm);
+      evTimers[evTimerCount].last = 0;
+      evTimerCount++;
     }
   }
-  if (strncmp(expr, "state.", 6) == 0) return stateInt(expr);
-  return atol(expr);
 }
 
-float evalFloat(const char* expr) {
-  if (!expr || !expr[0]) return 0.0f;
-  if (strncmp(expr, "state.", 6) == 0) return stateFloat(expr);
-  return atof(expr);
+static unsigned long eventLast(const char* name) {
+  for (int i = 0; i < evTimerCount; i++) if (strcmp(evTimers[i].name, name) == 0) return evTimers[i].last;
+  return 0;
 }
-
-bool evalBool(const char* expr) {
-  if (!expr || !expr[0]) return false;
-  int p = findParen(expr);
-  if (p > 0 && expr[strlen(expr)-1] == ')') {
-    String fn = String(expr).substring(0, p);
-    String in = String(expr).substring(p+1, strlen(expr)-1); in.trim();
-    if (fn == "is_true")        return evalBool(in.c_str());
-    if (fn == "stale_250ms")    return (millis() - (unsigned long)evalInt(in.c_str()) >= 250);
-    if (fn == "delay_elapsed") {
-      int64_t st = evalInt(in.c_str());
-      int64_t d  = stateRoot["delay_ms"] | (int64_t)3000;
-      return st > 0 && (millis() - (unsigned long)st >= (unsigned long)d);
-    }
-    if (fn == "timeout_3s")     return (millis() - (unsigned long)evalInt(in.c_str()) >= 3000);
-    if (fn == "clamp_60_90") {
-      float v = evalFloat(in.c_str());
-      if (v < 60.0f) stateSetF(in.c_str(), 60.0f);
-      if (v > 90.0f) stateSetF(in.c_str(), 90.0f);
-      return true;
-    }
-    if (fn == "lt_100")         return evalInt(in.c_str()) < 100;
-    return false;
-  }
-  if (strcmp(expr, "true") == 0) return true;
-  if (strncmp(expr, "state.", 6) == 0) return stateBool(expr);
-  return atol(expr) != 0;
-}
-
-String evalString(const char* expr) {
-  if (!expr || !expr[0]) return "";
-  int p = findParen(expr);
-  if (p > 0 && expr[strlen(expr)-1] == ')') {
-    String fn = String(expr).substring(0, p);
-    String in = String(expr).substring(p+1, strlen(expr)-1); in.trim();
-    if (fn == "format_ms") {
-      int64_t ms = evalInt(in.c_str());
-      char buf[12];
-      snprintf(buf, sizeof(buf), "%02lld:%02lld", ms/60000, (ms%60000)/1000);
-      return String(buf);
-    }
-    if (fn == "format_temp") {
-      char buf[16];
-      snprintf(buf, sizeof(buf), "%.1f F", evalFloat(in.c_str()));
-      return String(buf);
-    }
-  }
-  if (strncmp(expr, "state.", 6) == 0) {
-    String key = stripState(expr);
-    int64_t iv = stateRoot[key.c_str()] | (int64_t)0;
-    float   fv = stateRoot[key.c_str()] | 0.0f;
-    if (fv != (float)iv && fv != 0.0f) {
-      char buf[16];
-      snprintf(buf, sizeof(buf), "%.1f", fv);
-      return String(buf);
-    }
-    return String(iv);
-  }
-  return String(expr);
+static void eventSetLast(const char* name, unsigned long t) {
+  for (int i = 0; i < evTimerCount; i++) if (strcmp(evTimers[i].name, name) == 0) { evTimers[i].last = t; return; }
 }
 
 /* ==========================================================
-   Render primitives
+   Guard evaluation — structured comparisons only
    ========================================================== */
-void renderPrimitive(const char* type, JsonObject params) {
+static bool evalGuard(JsonVariant g) {
+  if (g.isNull()) return true;
+  JsonObject o = g.as<JsonObject>();
+  if (!o) return true;
+  const char* op = o["op"];
+  if (!op || strcmp(op, "always") == 0) return true;
+  JsonVariant a = o["a"], b = o["b"];
+  if      (strcmp(op, "eq") == 0) return varEq(a, b);
+  else if (strcmp(op, "ne") == 0) return !varEq(a, b);
+  else if (strcmp(op, "lt") == 0) return varFloat(a) <  varFloat(b);
+  else if (strcmp(op, "le") == 0) return varFloat(a) <= varFloat(b);
+  else if (strcmp(op, "gt") == 0) return varFloat(a) >  varFloat(b);
+  else if (strcmp(op, "ge") == 0) return varFloat(a) >= varFloat(b);
+  else if (strcmp(op, "is_true") == 0) return varBool(a);
+  else if (strcmp(op, "elapsed_ge") == 0) {
+    int64_t since = varInt(a);
+    int64_t ms    = varInt(b);
+    return since > 0 && (millis() - (unsigned long)since) >= (unsigned long)ms;
+  }
+  return false;
+}
+
+/* ==========================================================
+   Render primitives (declarative; params are literal-or-slot values)
+   ========================================================== */
+void renderPrimitive(const char* type, JsonObject p) {
   if (!type) return;
-  if (strcmp(type, "clear") == 0) {
-    tft.fillScreen(resolveColour(params["color"])); return;
-  }
+  if (strcmp(type, "clear") == 0) { tft.fillScreen(resolveColour(p["color"])); return; }
   if (strcmp(type, "text") == 0) {
-    int x = params["x"] | 0, y = params["y"] | 0, f = params["font"] | 2;
-    tft.setTextColor(resolveColour(params["color"]), TFT_BLACK);
-    tft.drawString(evalString(params["src"]).c_str(), x, y, f);
+    int32_t x = (int32_t)varInt(p["x"]), y = (int32_t)varInt(p["y"]), f = (int32_t)varInt(p["font"]) | 2;
+    if (f <= 0) f = 2;
+    tft.setTextColor(resolveColour(p["color"]), TFT_BLACK);
+    tft.drawString(varStr(p["src"]).c_str(), x, y, f);
     return;
   }
   if (strcmp(type, "rect") == 0) {
-    tft.drawRect(params["x"]|0, params["y"]|0, params["w"]|0, params["h"]|0,
-                 resolveColour(params["color"]));
+    tft.drawRect((int32_t)varInt(p["x"]), (int32_t)varInt(p["y"]),
+                 (int32_t)varInt(p["w"]), (int32_t)varInt(p["h"]),
+                 resolveColour(p["color"]));
+    return;
+  }
+  if (strcmp(type, "fillrect") == 0) {
+    tft.fillRect((int32_t)varInt(p["x"]), (int32_t)varInt(p["y"]),
+                 (int32_t)varInt(p["w"]), (int32_t)varInt(p["h"]),
+                 resolveColour(p["color"]));
     return;
   }
   if (strcmp(type, "line") == 0) {
-    tft.drawLine(params["x0"]|0, params["y0"]|0, params["x1"]|0, params["y1"]|0,
-                 resolveColour(params["color"]));
+    tft.drawLine((int32_t)varInt(p["x0"]), (int32_t)varInt(p["y0"]),
+                 (int32_t)varInt(p["x1"]), (int32_t)varInt(p["y1"]),
+                 resolveColour(p["color"]));
     return;
   }
   if (strcmp(type, "circle") == 0) {
-    tft.fillCircle(params["x"]|0, params["y"]|0, params["r"]|10,
-                   resolveColour(params["color"]));
+    tft.fillCircle((int32_t)varInt(p["x"]), (int32_t)varInt(p["y"]),
+                   (int32_t)varInt(p["r"]), resolveColour(p["color"]));
     return;
   }
   if (strcmp(type, "bar") == 0) {
-    int x = params["x"]|0, y = params["y"]|0, w = params["w"]|0, h = params["h"]|0;
-    uint16_t c = resolveColour(params["color"]);
-    tft.fillRect(x, y, w, h, c);
-    if (w > 0) tft.drawRect(x, y, w, h, c);
+    int32_t x = (int32_t)varInt(p["x"]), y = (int32_t)varInt(p["y"]);
+    int32_t w = (int32_t)varInt(p["w"]), h = (int32_t)varInt(p["h"]);
+    uint16_t c = resolveColour(p["color"]);
+    if (w > 0) tft.fillRect(x, y, w, h, c);
+    tft.drawRect(x, y, w, h, c);
     return;
   }
 }
 
+/* graph — temperature rolling line graph (temp-logger) */
+void renderGraph(JsonObject p) {
+#define GRAPH_SIZE 100
+  static float hist[GRAPH_SIZE];
+  static int   hCnt = 0;
+  float currentTemp = varFloat(p["slot"]);
+  int64_t sIdx = stateRoot["sample_idx"] | (int64_t)0;
+  if (hCnt < GRAPH_SIZE) hCnt++;
+  hist[sIdx % GRAPH_SIZE] = currentTemp;
+  int graphTop = 100, graphBot = 280;
+  tft.drawRect(10, graphTop, 220, graphBot - graphTop, TFT_DARKGREY);
+  int n = hCnt;
+  if (n > 1) {
+    int drawW = 220 / (n - 1);
+    if (drawW < 1) drawW = 1;
+    if (drawW > 4) drawW = 4;
+    for (int i = 0; i < n - 1; i++) {
+      int idx0 = (sIdx + i) % GRAPH_SIZE;
+      int idx1 = (sIdx + i + 1) % GRAPH_SIZE;
+      float v0 = hist[idx0], v1 = hist[idx1];
+      int y0 = graphBot - ((v0 - 60.0f) / 30.0f) * (graphBot - graphTop);
+      int y1 = graphBot - ((v1 - 60.0f) / 30.0f) * (graphBot - graphTop);
+      int x0 = 10 + i * drawW, x1 = 10 + (i + 1) * drawW;
+      if (x0 >= 10 && x1 <= 230) tft.drawLine(x0, y0, x1, y1, TFT_GREEN);
+    }
+  }
+}
+
 /* ==========================================================
-   Verb dispatcher — single verb
+   Verb execution
    ========================================================== */
+void execBlock(JsonArray block);
+
 void execVerb(JsonObject verb) {
   if (!verb) return;
-  const char* v = verb["v"];
-  if (!v) return;
 
-  /* lit — literal */
-  if (strcmp(v, "lit") == 0) return;
-
-  /* stamp — record millis() */
-  if (strcmp(v, "stamp") == 0) {
-    JsonArray a = verb["args"];
-    if (a && a.size() >= 1) stateSet(a[0], (int64_t)millis());
-    return;
-  }
-
-  /* transition — set phase */
-  if (strcmp(v, "transition") == 0) {
-    JsonArray a = verb["args"];
-    if (a && a.size() >= 2) stateSet(a[0], evalInt(a[1]));
-    return;
-  }
-
-  /* calc_reaction — compute reaction time */
-  if (strcmp(v, "calc_reaction") == 0) {
-    JsonArray a = verb["args"];
-    if (a && a.size() >= 2) {
-      int64_t go = stateInt(a[1]);
-      stateSet(a[0], (int64_t)(millis() - (unsigned long)go));
+  /* add: {"add":{"slot":"x","delta":<value>}} */
+  if (verb.containsKey("add")) {
+    JsonObject p = verb["add"];
+    const char* name = p["slot"];
+    if (name) {
+      JsonVariant cur = stateRoot[name];
+      float delta = varFloat(p["delta"]);
+      if (cur.is<float>()) stateRoot[name] = (float)cur + delta;
+      else                 stateRoot[name] = (int64_t)(stateRoot[name] | (int64_t)0) + (int64_t)delta;
     }
     return;
   }
 
-  /* add — state += value */
-  if (strcmp(v, "add") == 0) {
-    JsonArray a = verb["args"];
-    if (a && a.size() >= 2) {
-      int64_t curr = stateInt(a[0]);
-      int64_t delta = 0;
-      if (a[1].is<JsonObject>()) {
-        JsonObject inner = a[1];
-        const char* innerV = inner["v"];
-        if (innerV && strcmp(innerV, "lit") == 0) {
-          delta = evalInt(inner["args"][0]);
-        } else if (innerV && strcmp(innerV, "noise") == 0) {
-          int lo = (int)evalFloat(inner["args"][0]);
-          int hi = (int)evalFloat(inner["args"][1]);
-          delta = random(lo, hi);
-        } else {
-          delta = evalInt(inner["args"][0]);
-        }
-      } else {
-        delta = evalInt(a[1]);
-      }
-      stateSet(a[0], curr + delta);
+  /* sub: {"sub":{"slot":"x","delta":<value>}} */
+  if (verb.containsKey("sub")) {
+    JsonObject p = verb["sub"];
+    const char* name = p["slot"];
+    if (name) stateRoot[name] = (int64_t)(stateRoot[name] | (int64_t)0) - (int64_t)varInt(p["delta"]);
+    return;
+  }
+
+  /* set: {"set":{"slot":"x","value":<literal>}} */
+  if (verb.containsKey("set")) {
+    JsonObject p = verb["set"];
+    const char* name = p["slot"];
+    if (name) stateRoot[name].set(resolveVar(p["value"]));
+    return;
+  }
+
+  /* setf: {"setf":{"slot":"x","value":<number>}} */
+  if (verb.containsKey("setf")) {
+    JsonObject p = verb["setf"];
+    const char* name = p["slot"];
+    if (name) stateRoot[name] = varFloat(p["value"]);
+    return;
+  }
+
+  /* toggle: {"toggle":{"slot":"x"}} */
+  if (verb.containsKey("toggle")) {
+    JsonObject p = verb["toggle"];
+    const char* name = p["slot"];
+    if (name) {
+      bool val = (bool)(stateRoot[name] | false);
+      stateRoot[name] = !val;
     }
     return;
   }
 
-  /* sub — state -= value */
-  if (strcmp(v, "sub") == 0) {
-    JsonArray a = verb["args"];
-    if (a && a.size() >= 2) {
-      stateSet(a[0], stateInt(a[0]) - evalInt(a[1]));
-    }
+  /* stamp: {"stamp":{"slot":"x"}} — record millis() */
+  if (verb.containsKey("stamp")) {
+    JsonObject p = verb["stamp"];
+    const char* name = p["slot"];
+    if (name) stateRoot[name] = (int64_t)millis();
     return;
   }
 
-  /* toggle — flip bool */
-  if (strcmp(v, "toggle") == 0) {
-    JsonArray a = verb["args"];
-    if (a && a.size() >= 1) {
-      String key = stripState(a[0]);
-      bool val = (bool)(stateRoot[key.c_str()] | false);
-      stateRoot[key.c_str()] = !val;
-    }
+  /* now_minus: {"now_minus":{"slot":"x","from":<value>}} — x = millis() - from */
+  if (verb.containsKey("now_minus")) {
+    JsonObject p = verb["now_minus"];
+    const char* name = p["slot"];
+    if (name) stateRoot[name] = (int64_t)(millis() - (unsigned long)varInt(p["from"]));
     return;
   }
 
-  /* if — conditional: args=[state_expr, predicate_name] */
-  if (strcmp(v, "if") == 0) {
-    JsonArray a = verb["args"];
-    if (a && a.size() >= 2) {
-      const char* condExpr = a[0].as<const char*>();
-      const char* predExpr = a[1].as<const char*>();
-      if (condExpr && predExpr) {
-        String combined = String(predExpr) + "(" + String(condExpr) + ")";
-        bool cond = evalBool(combined.c_str());
-        if (cond) {
-          JsonArray thenBlock = verb["then"];
-          if (thenBlock) for (JsonObject sv : thenBlock) execVerb(sv);
-        } else {
-          JsonArray elseBlock = verb["else"];
-          if (elseBlock) for (JsonObject sv : elseBlock) execVerb(sv);
-        }
+  /* format: {"format":{"slot":"x","op":"ms"|"temp","src":<value>}} */
+  if (verb.containsKey("format")) {
+    JsonObject p = verb["format"];
+    const char* name = p["slot"];
+    const char* op = p["op"];
+    if (name && op) {
+      if (strcmp(op, "ms") == 0) {
+        int64_t ms = varInt(p["src"]);
+        char b[12]; snprintf(b, sizeof(b), "%02lld:%02lld", ms / 60000, (ms % 60000) / 1000);
+        stateRoot[name] = b;
+      } else if (strcmp(op, "temp") == 0) {
+        char b[16]; snprintf(b, sizeof(b), "%.1f F", varFloat(p["src"]));
+        stateRoot[name] = b;
       }
     }
     return;
   }
 
-  /* render_if — conditional render by phase match */
-  if (strcmp(v, "render_if") == 0) {
-    JsonArray a = verb["args"];
-    if (a && a.size() >= 2) {
-      if (stateInt(a[0]) == evalInt(a[1])) {
-        JsonArray thenBlock = verb["then"];
-        if (thenBlock) for (JsonObject sv : thenBlock) execVerb(sv);
-      }
+  /* progress: {"progress":{"slot":"x","src":<value>,"max":<value>,"px":<value>}} */
+  if (verb.containsKey("progress")) {
+    JsonObject p = verb["progress"];
+    const char* name = p["slot"];
+    if (name) {
+      int64_t max = varInt(p["max"]); if (max <= 0) max = 1;
+      int64_t w = (varInt(p["src"]) % max) * varInt(p["px"]) / max;
+      stateRoot[name] = (int64_t)w;
     }
     return;
   }
 
-  /* render — draw primitive */
-  if (strcmp(v, "render") == 0) {
-    JsonArray a = verb["args"];
-    if (a && a.size() >= 1) renderPrimitive(a[0], a[1]);
+  /* render: {"render":{"type":"text","x":...,"src":...}} */
+  if (verb.containsKey("render")) {
+    JsonObject p = verb["render"];
+    const char* t = p["type"];
+    if (t && strcmp(t, "graph") == 0) { renderGraph(p); return; }
+    if (t) renderPrimitive(t, p);
     return;
   }
 
-  /* graph — temperature line graph drawing (temp-logger) */
-  if (strcmp(v, "graph") == 0) {
-    JsonArray a = verb["args"];
-    if (a && a.size() >= 1) {
-#define GRAPH_SIZE 100
-      static float hist[GRAPH_SIZE];
-      static int   hCnt = 0;
-      float currentTemp = stateFloat(a[0]);
-      int64_t sIdx = stateRoot["sample_idx"] | (int64_t)0;
-      if (hCnt < GRAPH_SIZE) hCnt++;
-      hist[sIdx % GRAPH_SIZE] = currentTemp;
-      int graphTop = 100, graphBot = 280;
-      tft.drawRect(10, graphTop, 220, graphBot - graphTop, TFT_DARKGREY);
-      int n = hCnt;
-      if (n > 1) {
-        int drawW = 220 / (n - 1);
-        if (drawW < 1) drawW = 1;
-        if (drawW > 4) drawW = 4;
-        for (int i = 0; i < n - 1; i++) {
-          int idx0 = (sIdx + i) % GRAPH_SIZE;
-          int idx1 = (sIdx + i + 1) % GRAPH_SIZE;
-          float v0 = hist[idx0], v1 = hist[idx1];
-          int y0 = graphBot - ((v0 - 60.0f) / 30.0f) * (graphBot - graphTop);
-          int y1 = graphBot - ((v1 - 60.0f) / 30.0f) * (graphBot - graphTop);
-          int x0 = 10 + i * drawW, x1 = 10 + (i + 1) * drawW;
-          if (x0 >= 10 && x1 <= 230) tft.drawLine(x0, y0, x1, y1, TFT_GREEN);
-        }
-      }
-    }
+  /* if: {"if":{"guard":{...},"then":[...],"else":[...]}} */
+  if (verb.containsKey("if")) {
+    JsonObject p = verb["if"];
+    if (evalGuard(p["guard"])) { if (p["then"].is<JsonArray>()) execBlock(p["then"]); }
+    else                       { if (p["else"].is<JsonArray>()) execBlock(p["else"]); }
     return;
   }
-
-  /* noise — random (consumed by add verb args) */
-  if (strcmp(v, "noise") == 0) return;
-
-  /* unknown — skip */
-  return;
 }
 
-/* ==========================================================
-   Block runner
-   ========================================================== */
 void execBlock(JsonArray block) {
   if (!block) return;
   for (JsonObject sv : block) execVerb(sv);
+}
+
+/* Dispatch a named event: first matching handler's guard wins, then stop. */
+void dispatchEvent(const char* eventName) {
+  if (!behaviorLoaded || !behaviorRoot["events"]) return;
+  for (JsonObject ev : behaviorRoot["events"].as<JsonArray>()) {
+    const char* nm = ev["name"];
+    if (!nm || strcmp(nm, eventName) != 0) continue;
+    JsonArray handlers = ev["handlers"];
+    if (!handlers) return;
+    for (JsonObject h : handlers) {
+      if (evalGuard(h["guard"])) { if (h["run"].is<JsonArray>()) execBlock(h["run"]); return; }
+    }
+    return;
+  }
 }
 
 /* ==========================================================
@@ -450,10 +464,10 @@ bool setBehaviorFromJson(const char* jsonStr) {
   behaviorRoot = behaviorDoc.as<JsonObject>();
   if (!behaviorRoot["id"]) { Serial.println("No 'id'"); return false; }
   initStateFromDef();
+  resetEventTimers();
   behaviorLoaded = true;
-  toolChanged = true;
   const char* id = behaviorRoot["id"];
-  if (id) { activeToolId = String(id); saveConfigStr("active_tool", id); }
+  if (id) { activeToolId = String(id); saveConfigStr(ACTIVE_KEY, id); }
   return true;
 }
 
@@ -496,42 +510,56 @@ void loadBehavior(const char* toolId) {
 
 /* ==========================================================
    Built-in default behavior JSONs (flash/PROGMEM)
+   — contract-conformant: {"slot":".."} refs, structured guards,
+     named events / first-match-guard-wins, touch regions
    ========================================================== */
 const char TIMER_JSON[] PROGMEM =
   "{\"id\":\"timer\",\"name\":\"Count-Up Timer\",\"layout\":\"fullscreen\","
   "\"state\":[{\"name\":\"elapsed_ms\",\"type\":\"int64\",\"init\":0},"
-  "{\"name\":\"running\",\"type\":\"bool\",\"init\":true}],"
-  "\"on_tick\":\"tick\",\"on_touch\":\"on_touch\","
-  "\"behaviors\":{\"tick\":[{\"v\":\"if\",\"args\":[\"state.running\",\"is_true\"],"
-  "\"then\":[{\"v\":\"add\",\"args\":[\"state.elapsed_ms\",{\"v\":\"lit\",\"args\":\"1000\"}]},"
-  "{\"v\":\"render\",\"args\":[\"clear\",{\"color\":\"black\"}]},"
-  "{\"v\":\"render\",\"args\":[\"text\",{\"x\":25,\"y\":60,\"src\":\"Timer\",\"font\":2,\"color\":\"yellow\"}]},"
-  "{\"v\":\"render\",\"args\":[\"text\",{\"x\":50,\"y\":110,\"src\":\"format_ms(state.elapsed_ms)\",\"font\":6,\"color\":\"green\"}]},"
-  "{\"v\":\"render\",\"args\":[\"bar\",{\"x\":10,\"y\":170,\"w\":\"progress_bar(state.elapsed_ms)\",\"h\":10,\"color\":\"blue\"}]},"
-  "{\"v\":\"render\",\"args\":[\"text\",{\"x\":30,\"y\":210,\"src\":\"Touch to pause/resume\",\"font\":2,\"color\":\"white\"}]}]}],"
-  "\"on_touch\":[{\"v\":\"toggle\",\"args\":[\"state.running\"]}]}}";
+  "{\"name\":\"running\",\"type\":\"bool\",\"init\":true},"
+  "{\"name\":\"elapsed_txt\",\"type\":\"string\",\"init\":\"00:00\"},"
+  "{\"name\":\"progress_w\",\"type\":\"int64\",\"init\":0}],"
+  "\"events\":["
+  "{\"name\":\"tick\",\"schedule\":{\"type\":\"interval\",\"ms\":1000},\"handlers\":["
+  "{\"guard\":{\"op\":\"eq\",\"a\":{\"slot\":\"running\"},\"b\":{\"lit\":true}},\"run\":["
+  "{\"add\":{\"slot\":\"elapsed_ms\",\"delta\":{\"lit\":1000}}},"
+  "{\"format\":{\"slot\":\"elapsed_txt\",\"op\":\"ms\",\"src\":{\"slot\":\"elapsed_ms\"}}},"
+  "{\"progress\":{\"slot\":\"progress_w\",\"src\":{\"slot\":\"elapsed_ms\"},\"max\":{\"lit\":3600000},\"px\":{\"lit\":220}}},"
+  "{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},"
+  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":20},\"y\":{\"lit\":60},\"src\":{\"lit\":\"Timer\"},\"font\":{\"lit\":2},\"color\":\"yellow\"}},"
+  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":50},\"y\":{\"lit\":110},\"src\":{\"slot\":\"elapsed_txt\"},\"font\":{\"lit\":6},\"color\":\"green\"}},"
+  "{\"render\":{\"type\":\"bar\",\"x\":{\"lit\":10},\"y\":{\"lit\":170},\"w\":{\"slot\":\"progress_w\"},\"h\":{\"lit\":10},\"color\":\"blue\"}},"
+  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":30},\"y\":{\"lit\":210},\"src\":{\"lit\":\"Touch to pause/resume\"},\"font\":{\"lit\":2},\"color\":\"white\"}}"
+  "]}]},"
+  "{\"name\":\"touch-down\",\"region\":{\"x\":0,\"y\":0,\"w\":240,\"h\":320},\"handlers\":["
+  "{\"run\":[{\"toggle\":{\"slot\":\"running\"}}]}"
+  "]}]}";
 
 const char TEMP_JSON[] PROGMEM =
   "{\"id\":\"temp-logger\",\"name\":\"Temp Logger\",\"layout\":\"fullscreen\","
   "\"state\":[{\"name\":\"temp\",\"type\":\"float\",\"init\":72.0},"
   "{\"name\":\"last_tick\",\"type\":\"int64\",\"init\":0},"
   "{\"name\":\"sample_idx\",\"type\":\"int64\",\"init\":0},"
-  "{\"name\":\"sample_cnt\",\"type\":\"int64\",\"init\":0}],"
-  "\"on_tick\":\"tick\","
-  "\"behaviors\":{\"tick\":[{\"v\":\"if\",\"args\":[\"state.last_tick\",\"stale_250ms\"],\"then\":["
-  "{\"v\":\"stamp\",\"args\":[\"state.last_tick\"]},"
-  "{\"v\":\"add\",\"args\":[\"state.temp\",{\"v\":\"noise\",\"args\":[\"-2.0\",\"2.0\"]}]},"
-  "{\"v\":\"if\",\"args\":[\"state.temp\",\"clamp_60_90\"],\"then\":[]},"
-  "{\"v\":\"render\",\"args\":[\"clear\",{\"color\":\"black\"}]},"
-  "{\"v\":\"render\",\"args\":[\"text\",{\"x\":80,\"y\":40,\"src\":\"Temp Logger\",\"font\":2,\"color\":\"yellow\"}]},"
-  "{\"v\":\"render\",\"args\":[\"text\",{\"x\":70,\"y\":70,\"src\":\"format_temp(state.temp)\",\"font\":4,\"color\":\"cyan\"}]},"
-  "{\"v\":\"render\",\"args\":[\"rect\",{\"x\":10,\"y\":100,\"w\":220,\"h\":180,\"color\":\"darkgrey\"}]},"
-  "{\"v\":\"render\",\"args\":[\"text\",{\"x\":215,\"y\":100,\"src\":\"90F\",\"font\":1,\"color\":\"white\"}]},"
-  "{\"v\":\"render\",\"args\":[\"text\",{\"x\":215,\"y\":270,\"src\":\"60F\",\"font\":1,\"color\":\"white\"}]},"
-  "{\"v\":\"graph\",\"args\":[\"state.temp\",{}]},"
-  "{\"v\":\"add\",\"args\":[\"state.sample_idx\",{\"v\":\"lit\",\"args\":\"1\"}]},"
-  "{\"v\":\"if\",\"args\":[\"state.sample_cnt\",\"lt_100\"],\"then\":["
-  "{\"v\":\"add\",\"args\":[\"state.sample_cnt\",{\"v\":\"lit\",\"args\":\"1\"}]}]}]}]}}";
+  "{\"name\":\"sample_cnt\",\"type\":\"int64\",\"init\":0},"
+  "{\"name\":\"temp_txt\",\"type\":\"string\",\"init\":\"72.0 F\"}],"
+  "\"events\":["
+  "{\"name\":\"tick\",\"schedule\":{\"type\":\"interval\",\"ms\":250},\"handlers\":["
+  "{\"guard\":{\"op\":\"always\"},\"run\":["
+  "{\"stamp\":{\"slot\":\"last_tick\"}},"
+  "{\"add\":{\"slot\":\"temp\",\"delta\":{\"noise\":{\"lo\":-2.0,\"hi\":2.0}}}},"
+  "{\"if\":{\"guard\":{\"op\":\"lt\",\"a\":{\"slot\":\"temp\"},\"b\":{\"lit\":60}},\"then\":[{\"setf\":{\"slot\":\"temp\",\"value\":{\"lit\":60}}}]}},"
+  "{\"if\":{\"guard\":{\"op\":\"gt\",\"a\":{\"slot\":\"temp\"},\"b\":{\"lit\":90}},\"then\":[{\"setf\":{\"slot\":\"temp\",\"value\":{\"lit\":90}}}]}},"
+  "{\"format\":{\"slot\":\"temp_txt\",\"op\":\"temp\",\"src\":{\"slot\":\"temp\"}}},"
+  "{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},"
+  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":80},\"y\":{\"lit\":40},\"src\":{\"lit\":\"Temp Logger\"},\"font\":{\"lit\":2},\"color\":\"yellow\"}},"
+  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":70},\"y\":{\"lit\":70},\"src\":{\"slot\":\"temp_txt\"},\"font\":{\"lit\":4},\"color\":\"cyan\"}},"
+  "{\"render\":{\"type\":\"rect\",\"x\":{\"lit\":10},\"y\":{\"lit\":100},\"w\":{\"lit\":220},\"h\":{\"lit\":180},\"color\":\"darkgrey\"}},"
+  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":215},\"y\":{\"lit\":100},\"src\":{\"lit\":\"90F\"},\"font\":{\"lit\":1},\"color\":\"white\"}},"
+  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":215},\"y\":{\"lit\":270},\"src\":{\"lit\":\"60F\"},\"font\":{\"lit\":1},\"color\":\"white\"}},"
+  "{\"render\":{\"type\":\"graph\",\"slot\":{\"slot\":\"temp\"}}},"
+  "{\"add\":{\"slot\":\"sample_idx\",\"delta\":{\"lit\":1}}},"
+  "{\"if\":{\"guard\":{\"op\":\"lt\",\"a\":{\"slot\":\"sample_cnt\"},\"b\":{\"lit\":100}},\"then\":[{\"add\":{\"slot\":\"sample_cnt\",\"delta\":{\"lit\":1}}}]}}"
+  "]}]]}";
 
 const char REACTION_JSON[] PROGMEM =
   "{\"id\":\"reaction-game\",\"name\":\"Reaction Game\",\"layout\":\"fullscreen\","
@@ -540,35 +568,43 @@ const char REACTION_JSON[] PROGMEM =
   "{\"name\":\"go_at\",\"type\":\"int64\",\"init\":0},"
   "{\"name\":\"delay_ms\",\"type\":\"int64\",\"init\":3000},"
   "{\"name\":\"touch_ms\",\"type\":\"int64\",\"init\":0},"
-  "{\"name\":\"show_until\",\"type\":\"int64\",\"init\":0}],"
-  "\"on_tick\":\"tick\",\"on_touch\":\"on_touch\","
-  "\"behaviors\":{\"tick\":["
-  "{\"v\":\"render_if\",\"args\":[\"state.phase\",\"0\"],\"then\":["
-  "{\"v\":\"render\",\"args\":[\"clear\",{\"color\":\"black\"}]},"
-  "{\"v\":\"render\",\"args\":[\"text\",{\"x\":70,\"y\":40,\"src\":\"Reaction Game\",\"font\":2,\"color\":\"yellow\"}]},"
-  "{\"v\":\"render\",\"args\":[\"circle\",{\"x\":120,\"y\":140,\"r\":50,\"color\":\"green\"}]},"
-  "{\"v\":\"render\",\"args\":[\"text\",{\"x\":65,\"y\":200,\"src\":\"READY...\",\"font\":2,\"color\":\"white\"}]},"
-  "{\"v\":\"render\",\"args\":[\"text\",{\"x\":30,\"y\":240,\"src\":\"(wait for GO)\",\"font\":2,\"color\":\"darkgrey\"}]},"
-  "{\"v\":\"stamp\",\"args\":[\"state.wait_start\"]},"
-  "{\"v\":\"transition\",\"args\":[\"state.phase\",\"1\"]}]},"
-  "{\"v\":\"render_if\",\"args\":[\"state.phase\",\"1\"],\"then\":["
-  "{\"v\":\"if\",\"args\":[\"state.wait_start\",\"delay_elapsed\"],\"then\":["
-  "{\"v\":\"transition\",\"args\":[\"state.phase\",\"2\"]},"
-  "{\"v\":\"stamp\",\"args\":[\"state.go_at\"]},"
-  "{\"v\":\"render\",\"args\":[\"clear\",{\"color\":\"black\"}]},"
-  "{\"v\":\"render\",\"args\":[\"text\",{\"x\":70,\"y\":40,\"src\":\"Reaction Game\",\"font\":2,\"color\":\"yellow\"}]},"
-  "{\"v\":\"render\",\"args\":[\"circle\",{\"x\":120,\"y\":140,\"r\":50,\"color\":\"red\"}]},"
-  "{\"v\":\"render\",\"args\":[\"text\",{\"x\":75,\"y\":210,\"src\":\"TAP!\",\"font\":2,\"color\":\"white\"}]},"
-  "{\"v\":\"render\",\"args\":[\"text\",{\"x\":30,\"y\":240,\"src\":\"Touch the screen!\",\"font\":2,\"color\":\"white\"}]}]}]},"
-  "{\"v\":\"render_if\",\"args\":[\"state.phase\",\"2\"],\"then\":["
-  "{\"v\":\"if\",\"args\":[\"state.show_until\",\"timeout_3s\"],\"then\":["
-  "{\"v\":\"transition\",\"args\":[\"state.phase\",\"0\"]}]}]}],"
-  "\"on_touch\":[{\"v\":\"render_if\",\"args\":[\"state.phase\",\"2\"],\"then\":["
-  "{\"v\":\"calc_reaction\",\"args\":[\"state.touch_ms\",\"state.go_at\"]},"
-  "{\"v\":\"render\",\"args\":[\"clear\",{\"color\":\"black\"}]},"
-  "{\"v\":\"render\",\"args\":[\"text\",{\"x\":70,\"y\":40,\"src\":\"Reaction Game\",\"font\":2,\"color\":\"yellow\"}]},"
-  "{\"v\":\"render\",\"args\":[\"text\",{\"x\":40,\"y\":110,\"src\":\"format_ms(state.touch_ms)\",\"font\":6,\"color\":\"green\"}]},"
-  "{\"v\":\"stamp\",\"args\":[\"state.show_until\"]}]}]}}";
+  "{\"name\":\"show_until\",\"type\":\"int64\",\"init\":0},"
+  "{\"name\":\"result_txt\",\"type\":\"string\",\"init\":\"00:00\"}],"
+  "\"events\":["
+  "{\"name\":\"tick\",\"schedule\":{\"type\":\"interval\",\"ms\":100},\"handlers\":["
+  "{\"guard\":{\"op\":\"eq\",\"a\":{\"slot\":\"phase\"},\"b\":{\"lit\":0}},\"run\":["
+  "{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},"
+  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":70},\"y\":{\"lit\":40},\"src\":{\"lit\":\"Reaction Game\"},\"font\":{\"lit\":2},\"color\":\"yellow\"}},"
+  "{\"render\":{\"type\":\"circle\",\"x\":{\"lit\":120},\"y\":{\"lit\":140},\"r\":{\"lit\":50},\"color\":\"green\"}},"
+  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":65},\"y\":{\"lit\":200},\"src\":{\"lit\":\"READY...\"},\"font\":{\"lit\":2},\"color\":\"white\"}},"
+  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":30},\"y\":{\"lit\":240},\"src\":{\"lit\":\"(wait for GO)\"},\"font\":{\"lit\":2},\"color\":\"darkgrey\"}},"
+  "{\"stamp\":{\"slot\":\"wait_start\"}},"
+  "{\"set\":{\"slot\":\"phase\",\"value\":{\"lit\":1}}}"
+  "]},"
+  "{\"guard\":{\"op\":\"eq\",\"a\":{\"slot\":\"phase\"},\"b\":{\"lit\":1}},\"run\":["
+  "{\"if\":{\"guard\":{\"op\":\"elapsed_ge\",\"a\":{\"slot\":\"wait_start\"},\"b\":{\"slot\":\"delay_ms\"}},\"then\":["
+  "{\"set\":{\"slot\":\"phase\",\"value\":{\"lit\":2}}},"
+  "{\"stamp\":{\"slot\":\"go_at\"}},"
+  "{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},"
+  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":70},\"y\":{\"lit\":40},\"src\":{\"lit\":\"Reaction Game\"},\"font\":{\"lit\":2},\"color\":\"yellow\"}},"
+  "{\"render\":{\"type\":\"circle\",\"x\":{\"lit\":120},\"y\":{\"lit\":140},\"r\":{\"lit\":50},\"color\":\"red\"}},"
+  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":75},\"y\":{\"lit\":210},\"src\":{\"lit\":\"TAP!\"},\"font\":{\"lit\":2},\"color\":\"white\"}},"
+  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":30},\"y\":{\"lit\":240},\"src\":{\"lit\":\"Touch the screen!\"},\"font\":{\"lit\":2},\"color\":\"white\"}}"
+  "]}]},"
+  "{\"guard\":{\"op\":\"eq\",\"a\":{\"slot\":\"phase\"},\"b\":{\"lit\":2}},\"run\":["
+  "{\"if\":{\"guard\":{\"op\":\"elapsed_ge\",\"a\":{\"slot\":\"show_until\"},\"b\":{\"lit\":3000}},\"then\":["
+  "{\"set\":{\"slot\":\"phase\",\"value\":{\"lit\":0}}}]}]}"
+  "]},"
+  "{\"name\":\"touch-down\",\"region\":{\"x\":0,\"y\":0,\"w\":240,\"h\":320},\"handlers\":["
+  "{\"guard\":{\"op\":\"eq\",\"a\":{\"slot\":\"phase\"},\"b\":{\"lit\":2}},\"run\":["
+  "{\"now_minus\":{\"slot\":\"touch_ms\",\"from\":{\"slot\":\"go_at\"}}},"
+  "{\"format\":{\"slot\":\"result_txt\",\"op\":\"ms\",\"src\":{\"slot\":\"touch_ms\"}}},"
+  "{\"render\":{\"type\":\"clear\",\"color\":\"black\"}},"
+  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":70},\"y\":{\"lit\":40},\"src\":{\"lit\":\"Reaction Game\"},\"font\":{\"lit\":2},\"color\":\"yellow\"}},"
+  "{\"render\":{\"type\":\"text\",\"x\":{\"lit\":40},\"y\":{\"lit\":110},\"src\":{\"slot\":\"result_txt\"},\"font\":{\"lit\":6},\"color\":\"green\"}},"
+  "{\"stamp\":{\"slot\":\"show_until\"}}"
+  "]}]}"
+  "]}]}";
 
 /* Seed builtins to LittleFS on first boot */
 void seedDefaultBehaviors() {
@@ -688,7 +724,7 @@ void handleStatus() {
 void handleStore() {
   if (server.hasArg("url")) {
     storeUrl = server.arg("url");
-    saveConfigStr("store_url", storeUrl.c_str());
+    saveConfigStr(STORE_KEY, storeUrl.c_str());
     String json = "{\"ok\":true,\"url\":\"" + storeUrl + "\"}";
     server.send(200, "application/json", json);
     return;
@@ -721,8 +757,8 @@ void setup() {
   }
   LittleFS.mkdir("/behaviors/");
 
-  storeUrl = loadConfigStr("store_url", DEFAULT_STORE);
-  activeToolId = loadConfigStr("active_tool", DEFAULT_TOOL);
+  storeUrl = loadConfigStr(STORE_KEY, DEFAULT_STORE);
+  activeToolId = loadConfigStr(ACTIVE_KEY, DEFAULT_TOOL);
 
   tryStationConnect();
 
@@ -739,15 +775,12 @@ void setup() {
   server.begin();
 
   Serial.println();
-  Serial.println("OneBoard Stage 2 ready");
+  Serial.println("OneBoard Stage 2 ready (contract schema)");
   Serial.print("AP:  "); Serial.println(SOFT_AP_SSID);
   Serial.print("IP:  "); Serial.println(WiFi.softAPIP());
   if (wifiStationOk) { Serial.print("STA: "); Serial.println(WiFi.localIP()); }
   Serial.print("Store: "); Serial.println(storeUrl);
   Serial.print("Tool:  "); Serial.println(activeToolId);
-
-  delay(1500);
-  toolChanged = true;
 }
 
 /* ==========================================================
@@ -756,24 +789,40 @@ void setup() {
 void loop() {
   server.handleClient();
 
-  /* Periodic tick */
+  /* Scheduled events (bounded named timers) */
   unsigned long now = millis();
-  if (now - lastTickMs >= TICK_MS) {
-    lastTickMs = now;
-    if (behaviorLoaded && behaviorRoot["on_tick"]) {
-      const char* blockName = behaviorRoot["on_tick"];
-      JsonArray block = behaviorRoot["behaviors"][blockName];
-      if (block) execBlock(block);
+  if (behaviorLoaded && behaviorRoot["events"]) {
+    for (JsonObject ev : behaviorRoot["events"].as<JsonArray>()) {
+      JsonObject sched = ev["schedule"];
+      if (!sched) continue;
+      const char* stype = sched["type"];
+      if (stype && strcmp(stype, "interval") == 0) {
+        const char* name = ev["name"];
+        if (!name) continue;
+        unsigned long interval = (unsigned long)(sched["ms"] | 1000L);
+        if (now - eventLast(name) >= interval) {
+          eventSetLast(name, now);
+          dispatchEvent(name);
+        }
+      }
     }
   }
 
-  /* Touch handling */
+  /* Touch-down → named event via explicit region */
   uint16_t tx = 0, ty = 0;
   bool touched = tft.getTouch(&tx, &ty);
-  if (touched && behaviorLoaded && behaviorRoot["on_touch"]) {
-    const char* blockName = behaviorRoot["on_touch"];
-    JsonArray block = behaviorRoot["behaviors"][blockName];
-    if (block) execBlock(block);
+  if (touched && behaviorLoaded && behaviorRoot["events"]) {
+    for (JsonObject ev : behaviorRoot["events"].as<JsonArray>()) {
+      JsonObject region = ev["region"];
+      if (!region) continue;
+      uint16_t rx = 0, ry = 0, rw = 240, rh = 320;
+      rx = (uint16_t)varInt(region["x"]); ry = (uint16_t)varInt(region["y"]);
+      rw = (uint16_t)varInt(region["w"]); rh = (uint16_t)varInt(region["h"]);
+      if (tx >= rx && tx < rx + rw && ty >= ry && ty < ry + rh) {
+        dispatchEvent(ev["name"]);
+        break; /* first matching region wins */
+      }
+    }
   }
 
   delay(LOOP_DELAY);

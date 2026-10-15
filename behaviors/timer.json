@@ -4,23 +4,36 @@
   "layout": "fullscreen",
   "state": [
     {"name": "elapsed_ms", "type": "int64", "init": 0},
-    {"name": "running",    "type": "bool",  "init": true}
+    {"name": "running",    "type": "bool",  "init": true},
+    {"name": "elapsed_txt","type": "string","init": "00:00"},
+    {"name": "progress_w", "type": "int64", "init": 0}
   ],
-  "on_tick": "tick",
-  "on_touch": "on_touch",
-  "behaviors": {
-    "tick": [
-      {"v": "if", "args": ["state.running", "is_true"], "then": [
-        {"v": "add", "args": ["state.elapsed_ms", {"v": "lit", "args": "1000"}]},
-        {"v": "render", "args": ["clear", {"color": "black"}]},
-        {"v": "render", "args": ["text", {"x": 20, "y": 60, "src": "Timer", "font": 2, "color": "yellow"}]},
-        {"v": "render", "args": ["text", {"x": 50, "y": 110, "src": "format_ms(state.elapsed_ms)", "font": 6, "color": "green"}]},
-        {"v": "render", "args": ["bar", {"x": 10, "y": 170, "w": "progress_bar(state.elapsed_ms)", "h": 10, "color": "blue"}]},
-        {"v": "render", "args": ["text", {"x": 30, "y": 210, "src": "Touch to pause/resume", "font": 2, "color": "white"}]}
-      ]}
-    ],
-    "on_touch": [
-      {"v": "toggle", "args": ["state.running"]}
-    ]
-  }
+  "events": [
+    {
+      "name": "tick",
+      "schedule": {"type": "interval", "ms": 1000},
+      "handlers": [
+        {
+          "guard": {"op": "eq", "a": {"slot": "running"}, "b": {"lit": true}},
+          "run": [
+            {"add": {"slot": "elapsed_ms", "delta": {"lit": 1000}}},
+            {"format": {"slot": "elapsed_txt", "op": "ms", "src": {"slot": "elapsed_ms"}}},
+            {"progress": {"slot": "progress_w", "src": {"slot": "elapsed_ms"}, "max": {"lit": 3600000}, "px": {"lit": 220}}},
+            {"render": {"type": "clear", "color": "black"}},
+            {"render": {"type": "text", "x": {"lit": 20}, "y": {"lit": 60}, "src": {"lit": "Timer"}, "font": {"lit": 2}, "color": "yellow"}},
+            {"render": {"type": "text", "x": {"lit": 50}, "y": {"lit": 110}, "src": {"slot": "elapsed_txt"}, "font": {"lit": 6}, "color": "green"}},
+            {"render": {"type": "bar", "x": {"lit": 10}, "y": {"lit": 170}, "w": {"slot": "progress_w"}, "h": {"lit": 10}, "color": "blue"}},
+            {"render": {"type": "text", "x": {"lit": 30}, "y": {"lit": 210}, "src": {"lit": "Touch to pause/resume"}, "font": {"lit": 2}, "color": "white"}}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "touch-down",
+      "region": {"x": 0, "y": 0, "w": 240, "h": 320},
+      "handlers": [
+        {"run": [{"toggle": {"slot": "running"}}]}
+      ]
+    }
+  ]
 }

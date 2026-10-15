@@ -3,53 +3,77 @@
   "name": "Reaction Game",
   "layout": "fullscreen",
   "state": [
-    {"name": "phase",      "type": "int64", "init": 0},
-    {"name": "wait_start", "type": "int64", "init": 0},
-    {"name": "go_at",      "type": "int64", "init": 0},
-    {"name": "delay_ms",   "type": "int64", "init": 3000},
-    {"name": "touch_ms",   "type": "int64", "init": 0},
-    {"name": "show_until", "type": "int64", "init": 0},
-    {"name": "last_x",     "type": "int64", "init": 0},
-    {"name": "last_y",     "type": "int64", "init": 0}
+    {"name": "phase",      "type": "int64",  "init": 0},
+    {"name": "wait_start", "type": "int64",  "init": 0},
+    {"name": "go_at",      "type": "int64",  "init": 0},
+    {"name": "delay_ms",   "type": "int64",  "init": 3000},
+    {"name": "touch_ms",   "type": "int64",  "init": 0},
+    {"name": "show_until", "type": "int64",  "init": 0},
+    {"name": "result_txt", "type": "string", "init": "00:00"}
   ],
-  "on_tick": "tick",
-  "on_touch": "on_touch",
-  "behaviors": {
-    "tick": [
-      {"v": "render_if", "args": ["state.phase", "0"], "then": [
-        {"v": "render", "args": ["clear", {"color": "black"}]},
-        {"v": "render", "args": ["text", {"x": 70, "y": 40, "src": "Reaction Game", "font": 2, "color": "yellow"}]},
-        {"v": "render", "args": ["circle", {"x": 120, "y": 140, "r": 50, "color": "green"}]},
-        {"v": "render", "args": ["text", {"x": 65, "y": 200, "src": "READY...", "font": 2, "color": "white"}]},
-        {"v": "render", "args": ["text", {"x": 30, "y": 240, "src": "(wait for GO)", "font": 2, "color": "darkgrey"}]},
-        {"v": "stamp", "args": ["state.wait_start"]},
-        {"v": "transition", "args": ["state.phase", "1"]}
-      ]},
-      {"v": "render_if", "args": ["state.phase", "1"], "then": [
-        {"v": "if", "args": ["state.wait_start", "delay_elapsed"], "then": [
-          {"v": "transition", "args": ["state.phase", "2"]},
-          {"v": "stamp", "args": ["state.go_at"]},
-          {"v": "render", "args": ["clear", {"color": "black"}]},
-          {"v": "render", "args": ["text", {"x": 70, "y": 40, "src": "Reaction Game", "font": 2, "color": "yellow"}]},
-          {"v": "render", "args": ["circle", {"x": 120, "y": 140, "r": 50, "color": "red"}]},
-          {"v": "render", "args": ["text", {"x": 75, "y": 210, "src": "TAP!", "font": 2, "color": "white"}]},
-          {"v": "render", "args": ["text", {"x": 30, "y": 240, "src": "Touch the screen!", "font": 2, "color": "white"}]}
-        ]}
-      ]},
-      {"v": "render_if", "args": ["state.phase", "2"], "then": [
-        {"v": "if", "args": ["state.show_until", "timeout_3s"], "then": [
-          {"v": "transition", "args": ["state.phase", "0"]}
-        ]}
-      ]}
-    ],
-    "on_touch": [
-      {"v": "render_if", "args": ["state.phase", "2"], "then": [
-        {"v": "calc_reaction", "args": ["state.touch_ms", "state.go_at"]},
-        {"v": "render", "args": ["clear", {"color": "black"}]},
-        {"v": "render", "args": ["text", {"x": 70, "y": 40, "src": "Reaction Game", "font": 2, "color": "yellow"}]},
-        {"v": "render", "args": ["text", {"x": 40, "y": 110, "src": "format_ms(state.touch_ms)", "font": 6, "color": "green"}]},
-        {"v": "stamp", "args": ["state.show_until"]}
-      ]}
-    ]
-  }
+  "events": [
+    {
+      "name": "tick",
+      "schedule": {"type": "interval", "ms": 100},
+      "handlers": [
+        {
+          "guard": {"op": "eq", "a": {"slot": "phase"}, "b": {"lit": 0}},
+          "run": [
+            {"render": {"type": "clear", "color": "black"}},
+            {"render": {"type": "text", "x": {"lit": 70}, "y": {"lit": 40}, "src": {"lit": "Reaction Game"}, "font": {"lit": 2}, "color": "yellow"}},
+            {"render": {"type": "circle", "x": {"lit": 120}, "y": {"lit": 140}, "r": {"lit": 50}, "color": "green"}},
+            {"render": {"type": "text", "x": {"lit": 65}, "y": {"lit": 200}, "src": {"lit": "READY..."}, "font": {"lit": 2}, "color": "white"}},
+            {"render": {"type": "text", "x": {"lit": 30}, "y": {"lit": 240}, "src": {"lit": "(wait for GO)"}, "font": {"lit": 2}, "color": "darkgrey"}},
+            {"stamp": {"slot": "wait_start"}},
+            {"set": {"slot": "phase", "value": {"lit": 1}}}
+          ]
+        },
+        {
+          "guard": {"op": "eq", "a": {"slot": "phase"}, "b": {"lit": 1}},
+          "run": [
+            {"if": {
+              "guard": {"op": "elapsed_ge", "a": {"slot": "wait_start"}, "b": {"slot": "delay_ms"}},
+              "then": [
+                {"set": {"slot": "phase", "value": {"lit": 2}}},
+                {"stamp": {"slot": "go_at"}},
+                {"render": {"type": "clear", "color": "black"}},
+                {"render": {"type": "text", "x": {"lit": 70}, "y": {"lit": 40}, "src": {"lit": "Reaction Game"}, "font": {"lit": 2}, "color": "yellow"}},
+                {"render": {"type": "circle", "x": {"lit": 120}, "y": {"lit": 140}, "r": {"lit": 50}, "color": "red"}},
+                {"render": {"type": "text", "x": {"lit": 75}, "y": {"lit": 210}, "src": {"lit": "TAP!"}, "font": {"lit": 2}, "color": "white"}},
+                {"render": {"type": "text", "x": {"lit": 30}, "y": {"lit": 240}, "src": {"lit": "Touch the screen!"}, "font": {"lit": 2}, "color": "white"}}
+              ]
+            }}
+          ]
+        },
+        {
+          "guard": {"op": "eq", "a": {"slot": "phase"}, "b": {"lit": 2}},
+          "run": [
+            {"if": {
+              "guard": {"op": "elapsed_ge", "a": {"slot": "show_until"}, "b": {"lit": 3000}},
+              "then": [
+                {"set": {"slot": "phase", "value": {"lit": 0}}}
+              ]
+            }}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "touch-down",
+      "region": {"x": 0, "y": 0, "w": 240, "h": 320},
+      "handlers": [
+        {
+          "guard": {"op": "eq", "a": {"slot": "phase"}, "b": {"lit": 2}},
+          "run": [
+            {"now_minus": {"slot": "touch_ms", "from": {"slot": "go_at"}}},
+            {"format": {"slot": "result_txt", "op": "ms", "src": {"slot": "touch_ms"}}},
+            {"render": {"type": "clear", "color": "black"}},
+            {"render": {"type": "text", "x": {"lit": 70}, "y": {"lit": 40}, "src": {"lit": "Reaction Game"}, "font": {"lit": 2}, "color": "yellow"}},
+            {"render": {"type": "text", "x": {"lit": 40}, "y": {"lit": 110}, "src": {"slot": "result_txt"}, "font": {"lit": 6}, "color": "green"}},
+            {"stamp": {"slot": "show_until"}}
+          ]
+        }
+      ]
+    }
+  ]
 }
