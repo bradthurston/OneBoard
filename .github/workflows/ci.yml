@@ -1,0 +1,79 @@
+name: CI
+
+# OneBoard CI — runs on every push and pull request.
+#   * validates every behavior JSON against the VM vocabulary
+#   * builds the firmware for every supported CYD board
+# Keeps the public repo honest: a red checkmark means a broken behavior or a
+# board config that no longer compiles, before anyone flashes it.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  validate-behaviors:
+    name: Validate behaviors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate all behavior JSONs
+        run: |
+          set -euo pipefail
+          for f in behaviors/*.json; do
+            python3 tools/validate_behavior.py "$f" || exit 1
+          done
+          echo "All behaviors validated."
+
+  build-firmware:
+    name: Build (${{ matrix.env }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          - esp32-2432s028
+          - esp32-2432s024
+          - esp32-2432s032-ili9341
+          - esp32-2432s032-st7789
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+          key: pio-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-
+
+      - name: Install PlatformIO Core
+        run: pip install --quiet platformio
+
+      - name: Build firmware (${{ matrix.env }})
+        run: pio run -e "${{ matrix.env }}"
+
+  # Only needs to build once — but matrix already covers all envs above, so
+  # this job exists as a single-signal summary for the PR status.
+  ci-summary:
+    name: CI summary
+    runs-on: ubuntu-latest
+    needs: [validate-behaviors, build-firmware]
+    if: always()
+    steps:
+      - run: |
+          echo "validate-behaviors: ${{ needs.validate-behaviors.result }}"
+          echo "build-firmware:     ${{ needs.build-firmware.result }}"
+          test "${{ needs.validate-behaviors.result }}" = "success"
+          test "${{ needs.build-firmware.result }}" = "success"

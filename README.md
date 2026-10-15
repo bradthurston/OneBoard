@@ -1,5 +1,7 @@
 # OneBoard
 
+![CI](https://github.com/bradthurston-creator/OneBoard/actions/workflows/ci.yml/badge.svg)
+
 A **self-installing, multi-client hardware canvas** built on the ESP32 CYD
 (Cheap Yellow Display, 240×320). One board, many tools: it becomes whatever
 you describe — a timer, a temp logger, a reaction game, a tap counter, a
