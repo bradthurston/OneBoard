@@ -19,7 +19,46 @@ End-to-end guide: from a bare machine to a live, controllable board.
 
 ---
 
-## 2. Install PlatformIO
+## 2. Linux one-shot installer (fast path)
+
+On a Debian/Ubuntu, Fedora, or Arch machine you can skip most of the manual
+setup. Clone the repo and run:
+
+```bash
+git clone https://github.com/bradthurston-creator/OneBoard.git
+cd OneBoard
+./install.sh
+```
+
+What it does:
+- Installs system packages (git, curl, python3, venv, pip) via apt/dnf/pacman
+- Installs PlatformIO (official standalone installer, pip as fallback)
+- Adds your user to the **dialout** group so USB flashing works (log out/in
+  after)
+- Creates the project `.venv` and installs `requirements.txt`
+- Verifies `python-telegram-bot` imports from a clean env (catches the
+  leaked-PYTHONPATH trap before it bites under systemd)
+
+Options:
+```bash
+./install.sh --no-system      # skip distro package install (you did it yourself)
+./install.sh --with-store     # also install the behavior store as a systemd user service (port 8082)
+./install.sh --with-telegram  # also install the Telegram bot as a systemd user service
+```
+
+`--with-store` runs the store permanently as `oneboard-store.service`
+(survives reboot). `--with-telegram` creates
+`~/.hermes/keys/oneboard-telegram.env` from the template if it doesn't exist —
+fill in the token, then re-run with `--with-telegram` to start the bot.
+
+Idempotent — safe to re-run any time. Continue at **step 6** (first boot /
+captive portal) after flashing.
+
+---
+
+## 3. Install PlatformIO (manual)
+
+> The fast path above already did this — jump to step 6 after flashing.
 
 PlatformIO is the build/flash toolchain.
 
@@ -38,7 +77,7 @@ pio --version
 
 ---
 
-## 3. Get the code
+## 4. Get the code
 
 ```bash
 git clone https://github.com/bradthurston-creator/OneBoard.git
@@ -47,7 +86,7 @@ cd OneBoard
 
 ---
 
-## 4. Flash the firmware
+## 5. Flash the firmware
 
 Plug the board in and find its serial port:
 - Linux: `/dev/ttyUSB0` (check `ls /dev/ttyUSB*`)
@@ -74,7 +113,7 @@ You should see `OneBoard Stage 3 ready` and the board's AP appear.
 
 ---
 
-## 5. First boot — join it to WiFi (captive portal)
+## 6. First boot — join it to WiFi (captive portal)
 
 1. Power the board (USB is fine). It boots into **provisioning mode** — it
    creates its own WiFi access point.
@@ -91,7 +130,7 @@ From now on the board remembers the WiFi in NVS — it auto-joins on every boot.
 
 ---
 
-## 6. Point the board at a behavior store
+## 7. Point the board at a behavior store
 
 Tools ("behaviors") are JSON files served from a machine on your network —
 the board loads them over WiFi, compiles them to bytecode, and runs them.
@@ -117,7 +156,7 @@ from the store automatically.
 
 ---
 
-## 7. Author tools with an LLM (optional but the point of the project)
+## 8. Author tools with an LLM (optional but the point of the project)
 
 `tools/author.py` turns a plain-English request into a working tool on the
 board. It needs an OpenRouter API key:
@@ -145,7 +184,7 @@ via `/store` + `/load`. No reflash.
 
 ---
 
-## 8. Control from Telegram (optional)
+## 9. Control from Telegram (optional)
 
 1. In Telegram, message **@BotFather** → `/newbot` → pick a name and username.
    Copy the token it gives you.
@@ -178,7 +217,7 @@ via `/store` + `/load`. No reflash.
 
 ---
 
-## 9. View the screen from any browser
+## 10. View the screen from any browser
 
 Open `tools/board_view.html` in a browser, enter the board's IP, and it
 renders the board's actual screen from `/schema` + the behavior + `/state` —
@@ -193,7 +232,7 @@ with live state and a "simulate tap" button.
 | White screen / 4-digit number on boot | Wrong display driver config — this board needs `ILI9341_2_DRIVER`, `USE_HSPI_PORT`, fonts 2/4/6 (see `platformio.ini`). Don't "simplify" it. |
 | Touch does nothing | Touch is on separate VSPI; `USE_HSPI_PORT` is **mandatory** or touch is silently dead. |
 | `/load` fails on the board | Is `store/serve.py` running? Is the store URL set correctly on the board? Test `curl http://<store>:8082/` from the same network. |
-| `ModuleNotFoundError: No module named 'telegram'` | Run the bot with `.venv/bin/python`, not system python (step 8.3). |
+| `ModuleNotFoundError: No module named 'telegram'` | Run the bot with `.venv/bin/python`, not system python (step 9.3). |
 | Author tool returns empty / stalls | DeepSeek on OpenRouter can burn its budget on invisible reasoning — the tool already sends `reasoning:{enabled:false}`; make sure your key has credit. |
 | Captive portal page doesn't auto-open | Browse manually to `http://192.168.4.1` after joining the AP. |
 
