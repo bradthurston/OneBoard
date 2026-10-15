@@ -36,6 +36,7 @@
               "then": [
                 {"set": {"slot": "phase", "value": {"lit": 2}}},
                 {"stamp": {"slot": "go_at"}},
+                {"set": {"slot": "show_until", "value": {"lit": 0}}},
                 {"render": {"type": "clear", "color": "black"}},
                 {"render": {"type": "text", "x": {"lit": 70}, "y": {"lit": 40}, "src": {"lit": "Reaction Game"}, "font": {"lit": 2}, "color": "yellow"}},
                 {"render": {"type": "circle", "x": {"lit": 120}, "y": {"lit": 140}, "r": {"lit": 50}, "color": "red"}},
