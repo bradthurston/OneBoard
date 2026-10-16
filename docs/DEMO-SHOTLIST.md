@@ -196,7 +196,60 @@ on the panel at all.
 
 ## Already fixed, so don't film around it
 
+- **The first-boot message is unwatchable, and that is our bug (not yet fixed).** `setup()`
+  draws `Join AP to set up:` and then calls `loadBehavior(activeToolId)` two lines later
+  (`src/main.cpp` ~1591 then ~1604), which clears the panel and paints the default tool over
+  the instructions. The screen exists for a few hundred milliseconds, so **shot 4 cannot be
+  filmed at all** and a freshly erased board reads as "a board running a timer". Two shoots
+  missed it before this was found. The fix (Brad's call, not applied): skip `loadBehavior`
+  while `provisioningMode`, and in `handleWifi()` on a successful join paint a short
+  `Joined <ssid> -- <ip>` line and *then* load the tool, so the panel answers when setup
+  succeeds. Until that lands, a cut either omits shot 4 or says in the description that the
+  first-boot screen is there for a moment before the tool loads.
+- **The timer's own caption truncates on the panel.** `Touch to pause/resume` runs off the
+  240 px screen edge (`Touch to pause/resu`). Visible in footage; shorten the string or widen
+  the box.
 - **`temp-logger`'s axis labels** used to print static `90F`/`60F` while `R_GRAPH`
   auto-scales Y to its ring buffer — labels describing an axis that didn't exist — and they
   sat at x=215, *inside* the graph frame (10..230), so the trace drew through them. Removed
   from both the store copy and the PROGMEM builtin.
+
+## What was actually shot and cut (Oct 16 2026)
+
+Brad filmed two batches, 12 clips, into `docs/media/` — all portrait 1080x1920 with a −90
+rotation tag (ffmpeg autorotates; `-vf crop` then works in rotated coordinates). Read
+contact sheets before trusting timestamps: the two batches caught different things, and the
+first batch alone looked like a failed erase.
+
+Hero video: `docs/media/oneboard-demo-panel.mp4` — 1920x1080, 30 fps, **63.6 s**, silent,
+built by `tools/build_demo_cut.py` (re-run it after editing `SEGS`; `--only i,j` re-renders
+single segments and the concat re-stitches). Source clips and the MP4 are both untracked;
+attach the MP4 to a release.
+
+| cut | shot | source clip | in-clip |
+|---|---|---|---|
+| 01 | the blank board | `…061810003` | 3.6 s |
+| 02 | flash / esptool | `…105756348` | 13.6 s |
+| 03 | boots and runs alone | `…061810003` | 24.0 s |
+| 04 | join the board's AP | `…105913700` | 20.0 s |
+| 05 | captive portal opens | `…110015793` | 1.0 s |
+| 06 | provision | `…105913700` | 25.5 s |
+| 07 | joined + store found | `…110015793` | 12.0 s |
+| 08 | the launcher | `…105756348` | 43.5 s |
+| 09 | timer | `…110141307` | 23.5 s |
+| 10 | temp logger + graph | `…110141307` | 0.5 s |
+| 11 | tap counter (0→4) | `…110141307` | 18.6 s |
+| 12 | close, back to launcher | `…061845332` | 3.5 s |
+
+Gaps, stated rather than faked:
+
+- **Shot 4 (first-boot message)** — unfilmable until the boot-order fix above lands.
+- **Shot 12 (reaction-game)** — never filmed; only `timer`, `temp-logger` and `tap-counter`
+  were played on camera. The launcher shot lists all four, which is what the video claims.
+- The `…102704981` clip (116 s, `/make` of a multiplication table) is **not** in the cut: it
+  is a different story and it was filmed pre-flicker-fix.
+
+The flicker fix is visible in the footage and worth keeping as evidence: 12 consecutive
+frames at 1/30 s of the **running** timer in `…110141307` show **0 blank frames**, where the
+same test on the pre-fix stopwatch in `…102704981` (t=110 s) showed **4 blank of 12, 100 ms
+apart**. Pull consecutive frames, never samples, when checking this.

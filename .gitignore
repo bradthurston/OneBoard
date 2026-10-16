@@ -3,3 +3,6 @@ __pycache__/
 .pio/
 .venv/
 docs/media/demo-capture.json
+docs/media/VID_*.mp4
+docs/media/IMG_*.jpg
+docs/media/oneboard-demo-panel.mp4
