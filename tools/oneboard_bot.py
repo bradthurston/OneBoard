@@ -2,8 +2,9 @@
 """
 OneBoard Telegram control bot.
 
-A thin, deterministic bot (no LLM in the loop) that controls a OneBoard CYD
-over its HTTP API: /status, /load?id=..., /schema, and the store's tool list.
+A thin bot that controls a OneBoard CYD over its HTTP API: /status,
+/load?id=..., /schema, the store's tool list — and /make, which authors a NEW
+behavior by delegating to tools/author.py (the LLM stage-4 pipeline).
 
 Run as a systemd user service like the other gateways:
     hermes-gateway-oneboard.service
@@ -37,6 +38,7 @@ INSTALL
 import os
 import sys
 import json
+import asyncio
 import urllib.request
 import urllib.parse
 
@@ -47,6 +49,23 @@ TOKEN = os.environ.get("ONBOARD_BOT_TOKEN", "")
 BOARD = os.environ.get("ONBOARD_BOARD_IP", "").strip()
 STORE = os.environ.get("ONBOARD_STORE_URL", "").strip().rstrip("/")
 ALLOWED = {int(x) for x in os.environ.get("ONBOARD_ALLOWED", "").split(",") if x.strip()}
+
+# Where tools/author.py and its venv live (same checkout as this bot).
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.normpath(os.path.join(HERE, ".."))
+VENV_PY = os.path.join(REPO, ".venv", "bin", "python")
+
+# The store port to pass author.py --store-port. Infer from ONBOARD_STORE_URL
+# (e.g. http://192.168.1.169:8082 -> 8082); override via ONBOARD_STORE_PORT.
+def _store_port():
+    if os.environ.get("ONBOARD_STORE_PORT"):
+        return os.environ["ONBOARD_STORE_PORT"].strip()
+    if STORE:
+        try:
+            return str(urllib.parse.urlparse(STORE).port or 8082)
+        except ValueError:
+            pass
+    return "8082"
 
 def http_get(url, timeout=8):
     with urllib.request.urlopen(url, timeout=timeout) as resp:
@@ -90,6 +109,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/status — current tool + WiFi + IP\n"
         "/tools — list available behaviors\n"
         "/load <id> — load a behavior onto the board\n"
+        "/make <request> — author a NEW behavior and push it to the board (LLM)\n"
         "/schema — VM vocabulary (self-description)\n"
         "/help — this"
     )
@@ -152,6 +172,58 @@ async def cmd_schema(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Board unreachable: {e}")
 
 
+
+async def cmd_make(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not authorized(update):
+        return
+    if not ctx.args:
+        await update.message.reply_text(
+            "Usage: /make <request>   e.g. /make a countdown timer\n"
+            "I turn it into a OneBoard behavior and push it to the board "
+            "(this takes ~30-90s — I'll reply when it's done)."
+        )
+        return
+    request = " ".join(ctx.args).strip()
+    if not request:
+        await update.message.reply_text("Empty request.")
+        return
+
+    confirm = await update.message.reply_text(
+        f"Authoring: \"{request}\"\n"
+        f"Writing the behavior, validating, and pushing to the board…"
+    )
+
+    cmd = [VENV_PY, os.path.join(REPO, "tools", "author.py"),
+           request, "--board", BOARD, "--store-port", _store_port()]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+        )
+    except FileNotFoundError as e:
+        await confirm.edit_text(f"Failed to launch author.py: {e}")
+        return
+
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=240)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await confirm.edit_text("Author timed out after 240s — try again.")
+        return
+
+    text = out.decode(errors="replace").strip()
+    summary = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("Wrote:", "VALID", "FAILED", "{", "Store:", "Board:")):
+            summary.append(stripped)
+    tail = "\n".join(summary) if summary else text[-1500:]
+    if proc.returncode == 0:
+        reply = f"Tool created and loaded.\n\n{tail}"
+    else:
+        reply = f"Author failed (exit {proc.returncode}).\n\n{tail}"
+    await confirm.edit_text(reply[:4000])
+
+
 def main():
     if not TOKEN:
         print("ONBOARD_BOT_TOKEN not set — cannot start", file=sys.stderr)
@@ -170,6 +242,7 @@ def main():
     app.add_handler(CommandHandler("tools", cmd_tools))
     app.add_handler(CommandHandler("load", cmd_load))
     app.add_handler(CommandHandler("schema", cmd_schema))
+    app.add_handler(CommandHandler("make", cmd_make))
     print("OneBoard bot polling (board=%s)" % BOARD)
     app.run_polling()
 

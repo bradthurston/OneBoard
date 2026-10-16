@@ -176,9 +176,20 @@ Open `tools/board_view.html` (or `http://<board>/`) — it renders the screen fr
 `/schema` + the behavior JSON + `/state`, with live state and simulate-tap.
 
 ### Control from Telegram
-Message `@OneBoardControl_bot`: `/status`, `/tools`, `/load <id>`, `/schema`, `/help`.
+Message `@OneBoardControl_bot`:
+`/status` — current tool + WiFi + IP
+`/tools` — list available behaviors
+`/load <id>` — load an existing behavior onto the board
+`/make <request>` — author a NEW behavior and push it to the board (delegates
+  to `tools/author.py`, the LLM stage-4 pipeline; takes ~30-90s — it validates,
+  self-corrects, and pushes over the wire, no reflash)
+`/schema` — the VM vocabulary
+`/help`
+
 Runs as the systemd user service `oneboard-tg-bot` (see `systemd/`).
 Token lives in `~/.hermes/keys/oneboard-telegram.env` (0600) — never in the repo.
+`/make` reuses the bot's own `ONBOARD_BOARD_IP` / store URL and runs author.py
+in the project venv.
 
 ### Run the store
 ```bash
