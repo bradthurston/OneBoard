@@ -30,6 +30,12 @@ jobs:
           done
           echo "All behaviors validated."
 
+      # The board loads the PROGMEM copy on a fresh flash, so a fix applied only
+      # to behaviors/*.json never reaches a from-scratch board. This caught
+      # temp-logger shipping its bad axis labels in the firmware literal.
+      - name: Firmware builtins match behaviors/
+        run: python3 tools/check_builtins.py
+
   vm-regression:
     name: VM regression tests
     runs-on: ubuntu-latest

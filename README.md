@@ -19,14 +19,17 @@ self-description: a web page, a Telegram bot, or an LLM.
 
 ## Demo
 
-![OneBoard cycling through tools on a single board, no reflash](docs/media/oneboard-demo.gif)
+![OneBoard running its built-in tools on a single board, no reflash](docs/media/oneboard-demo.gif)
 
-One board, eight tools, no reflash. The panel is rendering from the board's own
-self-description — the same `/schema` + `/state` + behavior JSON any client reads.
+One board, four tools, no reflash. These are the behaviors compiled into the
+firmware itself — nothing is fetched, nothing is re-flashed. The panel is rendering
+from the board's own self-description, the same `/schema` + `/state` + behavior JSON
+any client reads.
 
-Filming it yourself: [`docs/DEMO-SHOTLIST.md`](docs/DEMO-SHOTLIST.md) has the shot
-list, plus `tools/demo_drive.py` (cues you through the take and confirms every tap
-landed) and `tools/render_frames.py` (turns the same recorded sequence into the GIF).
+Shooting it yourself: [`docs/DEMO-SHOTLIST.md`](docs/DEMO-SHOTLIST.md) covers the
+from-scratch take (erase, flash, first boot, captive portal, then the builtins),
+plus `tools/demo_drive.py` (cues you through the take and confirms every tap landed)
+and `tools/render_frames.py` (turns the same recorded sequence into the GIF).
 
 ---
 

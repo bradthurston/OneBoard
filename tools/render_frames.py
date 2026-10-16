@@ -34,6 +34,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 
 from PIL import Image, ImageDraw, ImageFont
@@ -285,7 +286,14 @@ def board_snapshot(board: str) -> dict:
             "state": get_json(f"http://{board}/state")}
 
 
-def frames_from_tour(board: str) -> list:
+# The behaviors compiled into the firmware itself (PROGMEM), per
+# progmemBehavior()/seedDefaultBehaviors() in src/main.cpp. A board flashed from
+# scratch has exactly these - the rest live only in the store, so a demo that
+# claims to show "what the firmware comes with" must not include them.
+BUILTINS = ["timer", "temp-logger", "reaction-game", "tap-counter"]
+
+
+def frames_from_tour(board: str, builtins_only: bool = False) -> list:
     """Cycle the board through every tool in its store plus the launcher.
 
     Each screen is real: /load is sent to the board, then /status + /state are
@@ -300,6 +308,15 @@ def frames_from_tour(board: str) -> list:
     """
     st = get_json(f"http://{board}/status")
     tools = store_tools(st["store_url"])
+    if builtins_only:
+        tools = [t for t in tools if t in BUILTINS]
+        if st.get("tool") not in tools and tools:
+            # The board is sitting on a store-only tool, so the launcher would
+            # render with nothing highlighted - true, but a poor first frame and
+            # not what a from-scratch board looks like. Load a builtin first.
+            get_json(f"http://{board}/load?id={tools[0]}&home=1")
+            time.sleep(0.5)
+            st = get_json(f"http://{board}/status") or st
     frames = []
     if st.get("home"):
         print("  ! board is in home mode - the panel is on the launcher. "
@@ -395,6 +412,9 @@ def main() -> int:
     ap.add_argument("--log", help="capture log from demo_drive.py --record")
     ap.add_argument("--tour", action="store_true",
                     help="cycle every tool in the store (no finger required)")
+    ap.add_argument("--builtins-only", action="store_true",
+                    help="with --tour: only the four tools compiled into the "
+                         "firmware, i.e. what a from-scratch board actually has")
     ap.add_argument("--out", default="docs/media")
     ap.add_argument("--hold-ms", type=int, default=1100)
     ap.add_argument("--name", default="oneboard-demo")
@@ -404,7 +424,7 @@ def main() -> int:
     if a.log:
         frames = frames_from_log(a.log)
     elif a.tour:
-        frames = frames_from_tour(a.board)
+        frames = frames_from_tour(a.board, builtins_only=a.builtins_only)
     else:
         ap.error("pick --tour or --log")
 
