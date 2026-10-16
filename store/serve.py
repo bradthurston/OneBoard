@@ -43,6 +43,11 @@ class BehaviorHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS, DELETE")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        # Never let a browser serve a stale copy of the tool list. Tools are
+        # added and deleted constantly while authoring, and a cached listing
+        # makes a deleted tool look like it's still in the store (or a new one
+        # look missing). Same reason the board's setup page is no-store.
+        self.send_header("Cache-Control", "no-store, must-revalidate")
         super().end_headers()
 
     def _json(self, code, payload):
