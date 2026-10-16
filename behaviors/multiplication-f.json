@@ -1,0 +1,33 @@
+{
+  "id": "multiplication-f",
+  "name": "Multiplication Practice",
+  "layout": "fullscreen",
+  "state": [
+    { "name": "a", "type": "int64", "init": 0 },
+    { "name": "b", "type": "int64", "init": 0 },
+    { "name": "a_txt", "type": "string", "init": "12" },
+    { "name": "b_txt", "type": "string", "init": "5" }
+  ],
+  "events": [
+    {
+      "name": "touch-down",
+      "handlers": [
+        {
+          "guard": { "op": "always" },
+          "run": [
+            { "random": { "slot": "a", "min": { "lit": 12 }, "max": { "lit": 97 } } },
+            { "random": { "slot": "b", "min": { "lit": 2 }, "max": { "lit": 9 } } },
+            { "format": { "slot": "a_txt", "op": "int", "src": { "slot": "a" } } },
+            { "format": { "slot": "b_txt", "op": "int", "src": { "slot": "b" } } },
+            { "render": { "type": "clear", "color": "black" } },
+            { "render": { "type": "text", "x": { "lit": 120 }, "y": { "lit": 60 }, "src": { "slot": "a_txt" }, "font": { "lit": 6 }, "color": "white", "center": true } },
+            { "render": { "type": "text", "x": { "lit": 120 }, "y": { "lit": 110 }, "src": { "lit": "x" }, "font": { "lit": 2 }, "color": "yellow", "center": true } },
+            { "render": { "type": "text", "x": { "lit": 120 }, "y": { "lit": 160 }, "src": { "slot": "b_txt" }, "font": { "lit": 6 }, "color": "white", "center": true } },
+            { "render": { "type": "text", "x": { "lit": 120 }, "y": { "lit": 220 }, "src": { "lit": "= ?" }, "font": { "lit": 2 }, "color": "white", "center": true } },
+            { "render": { "type": "text", "x": { "lit": 120 }, "y": { "lit": 300 }, "src": { "lit": "tap for new" }, "font": { "lit": 2 }, "color": "grey", "center": true } }
+          ]
+        }
+      ]
+    }
+  ]
+}
