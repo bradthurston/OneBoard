@@ -147,7 +147,8 @@ def main() -> int:
             print(f"        on screen: {expect}")
 
         if load and a.preload:
-            get_json(f"http://{a.board}/load?id={load}")
+            # home=0 leaves the launcher so the tool is what's on the panel
+            get_json(f"http://{a.board}/load?id={load}&home=0")
             time.sleep(1.0)
 
         if need_tap and a.cue:

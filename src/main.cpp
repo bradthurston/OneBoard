@@ -641,7 +641,26 @@ void handleLoad() {
     String id = server.arg("id");
     bool ok = loadBehavior(id.c_str());
     if (ok) {
-      String json = "{\"ok\":true,\"tool\":\"" + id + "\"}";
+      // Optional home control so a script can drive a demo without a finger:
+      //   /load?id=X&home=0  -> leave the launcher and show the loaded tool
+      //   /load?id=X&home=1  -> (re)open the launcher, tool paused
+      // Omitting the arg leaves the current mode alone, so existing clients
+      // (the web page, the Telegram bot) behave exactly as before.
+      if (server.hasArg("home")) {
+        bool wantHome = server.arg("home") != "0";
+        if (wantHome && !homeMode) {
+          homeScroll = 0;
+          homeCount = loadStoreToolList();
+          homeMode = true;
+          drawHomeScreen();
+        } else if (!wantHome && homeMode) {
+          homeMode = false;
+          if (vmInitialized) { vmRender(&g_state, &g_prog, &tft); drawHomeButton(); }
+        }
+      }
+      String json = "{\"ok\":true,\"tool\":\"" + id + "\",\"home\":";
+      json += homeMode ? "true" : "false";
+      json += "}";
       server.send(200, "application/json", json);
     } else {
       // Report the real reason (compile error, no source, bad JSON) so a

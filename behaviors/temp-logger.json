@@ -26,8 +26,6 @@
             {"render": {"type": "text", "x": {"lit": 80}, "y": {"lit": 40}, "src": {"lit": "Temp Logger"}, "font": {"lit": 2}, "color": "yellow"}},
             {"render": {"type": "text", "x": {"lit": 70}, "y": {"lit": 70}, "src": {"slot": "temp_txt"}, "font": {"lit": 4}, "color": "cyan"}},
             {"render": {"type": "rect", "x": {"lit": 10}, "y": {"lit": 100}, "w": {"lit": 220}, "h": {"lit": 180}, "color": "darkgrey"}},
-            {"render": {"type": "text", "x": {"lit": 215}, "y": {"lit": 100}, "src": {"lit": "90F"}, "font": {"lit": 1}, "color": "white"}},
-            {"render": {"type": "text", "x": {"lit": 215}, "y": {"lit": 270}, "src": {"lit": "60F"}, "font": {"lit": 1}, "color": "white"}},
             {"render": {"type": "graph", "slot": {"slot": "temp"}}},
             {"add": {"slot": "sample_idx", "delta": {"lit": 1}}},
             {"if": {"guard": {"op": "lt", "a": {"slot": "sample_cnt"}, "b": {"lit": 100}}, "then": [{"add": {"slot": "sample_cnt", "delta": {"lit": 1}}}]}}

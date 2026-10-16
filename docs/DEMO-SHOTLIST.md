@@ -95,17 +95,32 @@ metrics are host approximations of TFT_eSPI's GLCD fonts, so glyphs can sit a
 pixel or two off the panel. Say so if anyone asks; don't imply it's a capture of
 the LCD.
 
-## Known cosmetic issues visible in the demo
+## Driving the board without a finger
 
-Both are pre-existing, both are cosmetic, neither affects function — worth fixing
-before the video goes up if you care:
+`/load` now takes an optional `home` argument, so a script can put a tool on the
+panel without anyone touching it:
 
-1. **The home glyph collides with the title on the launcher.** `drawHomeScreen()`
-   draws "OneBoard — pick a tool" at x=6 with font 2, and `drawHomeButton()` draws
-   the back arrow at x=7..16, y=7..17 — the same pixels. On the panel the arrow
-   cuts into the "O". Fix: move the title to x=22, or draw the arrow last in the
-   reserved corner and shift the title right.
-2. **`temp-logger`'s axis labels are static.** It prints `90F` at the top of the
-   graph and `60F` at the bottom, but `R_GRAPH` auto-scales Y to whatever is in
-   its ring buffer — so the labels don't describe the axis. Fix: drop them, or
-   make them slots driven by the graph's observed min/max.
+```
+/load?id=multiplication-f&home=0    # leave the launcher, show the tool
+/load?id=timer&home=1               # open the launcher, tool paused
+/load?id=dice                       # no arg: leave the mode alone (old behaviour)
+```
+
+`tools/render_frames.py --tour` uses `home=0` to walk every tool in the store.
+The response now echoes the resulting mode: `{"ok":true,"tool":"dice","home":false}`.
+
+## Known cosmetic issue visible in the demo
+
+One pre-existing, cosmetic, non-functional issue — worth fixing before the video
+goes up if you care:
+
+1. **`temp-logger`'s axis labels were a lie.** It printed static `90F`/`60F`
+   labels while `R_GRAPH` auto-scales Y to whatever is in its ring buffer — so the
+   labels described an axis that didn't exist. They also sat at x=215, *inside*
+   the graph frame (10..230), so the trace drew straight through them. **Fixed:**
+   both labels removed. The graph is auto-scaled and the live reading is already
+   printed above it, so the frame is self-explanatory.
+
+`temp-logger.json` is served from `behaviors/`, so the store picks up the fix
+immediately — no reflash needed for that one. Save it from the board's web page or
+`/load` it again to see it.

@@ -217,6 +217,19 @@ def walk_render_ops(doc: dict) -> list:
     return ops
 
 
+def draw_home_glyph(d: ImageDraw.ImageDraw) -> None:
+    """The persistent back-arrow, mirrored from drawHomeButton() in main.cpp.
+
+    The firmware draws this AFTER every tool render (loop() calls drawHomeButton
+    following vmRender), so a tool can never erase it. It is NOT drawn on the
+    launcher: drawHomeScreen() fillScreens the display and never redraws it.
+    """
+    cx, cy = 0 + 6, 0 + 6
+    d.rectangle([cx + 5, cy + 4, cx + 5 + 5, cy + 4 + 2], fill=COLORS["yellow"])
+    d.polygon([(cx + 1, cy + 5), (cx + 8, cy + 1), (cx + 8, cy + 11)],
+              fill=COLORS["yellow"])
+
+
 def render_tool_screen(doc: dict, slots: dict) -> Image.Image:
     img = Image.new("RGB", (W, H), (0, 0, 0))
     d = ImageDraw.Draw(img)
@@ -224,6 +237,7 @@ def render_tool_screen(doc: dict, slots: dict) -> Image.Image:
         fn = RENDERERS.get(str(rp.get("type")))
         if fn:
             fn(d, rp, slots)
+    draw_home_glyph(d)   # firmware redraws the home arrow on top of the tool
     return img
 
 
@@ -233,12 +247,6 @@ def render_tool_screen(doc: dict, slots: dict) -> Image.Image:
 def render_home_screen(tools: list, active: str) -> Image.Image:
     img = Image.new("RGB", (W, H), COLORS["black"])
     d = ImageDraw.Draw(img)
-
-    # persistent back-arrow glyph, top-left
-    cx, cy = 0 + 6, 0 + 6
-    d.rectangle([cx + 5, cy + 4, cx + 5 + 5, cy + 4 + 2], fill=COLORS["yellow"])
-    d.polygon([(cx + 1, cy + 5), (cx + 8, cy + 1), (cx + 8, cy + 11)],
-              fill=COLORS["yellow"])
 
     d.text((6, 6), "OneBoard \u2014 pick a tool", font=font(FONT_PX[2]),
            fill=COLORS["yellow"], anchor="la")
@@ -302,13 +310,17 @@ def frames_from_tour(board: str) -> list:
 
     for t in tools:
         try:
-            get_json(f"http://{board}/load?id={t}")
+            # home=0 takes the board out of the launcher so the loaded tool is
+            # what's actually on the panel (firmware support added 2026-10-16).
+            get_json(f"http://{board}/load?id={t}&home=0")
         except Exception as e:  # noqa: BLE001
             print(f"  ! load {t} failed: {e}", file=sys.stderr)
             continue
         status = get_json(f"http://{board}/status") or {}
         if status.get("home"):
             # truthful: the panel still shows the launcher
+            print(f"  ! {t}: still in home mode (firmware without home=0?) - "
+                  "rendering the launcher instead", file=sys.stderr)
             frames.append(("home", render_home_screen(tools, t)))
             continue
         state = get_json(f"http://{board}/state")
