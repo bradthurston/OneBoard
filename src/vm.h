@@ -50,6 +50,10 @@ enum VmOp : uint8_t {
   // --- State manipulation (dst = slot index, a = source) ---
   OP_ADD,        // dst += a
   OP_SUB,        // dst -= a
+  OP_MUL,        // dst *= a
+  OP_DIV,        // dst /= a  (a != 0 guard; else dst = 0)
+  OP_MOD,        // dst %= a  (a != 0 guard; else dst = 0)
+  OP_CLAMP,      // dst = clamp(dst, a_low, b_high)  (a <= dst <= b)
   OP_SET,        // dst = a
   OP_TOGGLE,     // dst = !dst
   OP_STAMP,      // dst = millis()

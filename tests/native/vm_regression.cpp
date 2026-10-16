@@ -72,6 +72,46 @@ static void progress() {
     assert(p.instrs[0].b_val==(mode?100:1)); assert(p.instrs[0].c_val==(mode==2?200:220));
   }
 }
+static void exec1(JsonDocument& d, const char* verb, const char* slot, int64_t value) {
+  auto args=run(d).add<JsonObject>()[verb].to<JsonObject>(); args["slot"]=slot; args["value"]["lit"]=value;
+}
+static void mathVerbs() {
+  // mul: n(50) * 3 = 150
+  { auto d=makeTool(); exec1(d,"mul","n",3); VmProgram p; VmState s; assert(vmCompile(d.as<JsonObject>(),&p)); vmStateInit(&s,&p);
+    assert(vmDispatch(&s,&p,"touch-down")); assert(vmGetInt(&s,0)==150); }
+  // mul on float slot preserves float type
+  { auto d=makeTool(); d["state"][0]["type"]="float"; d["state"][0]["init"]=2.5f; exec1(d,"mul","n",2);
+    VmProgram p; VmState s; assert(vmCompile(d.as<JsonObject>(),&p)); vmStateInit(&s,&p);
+    assert(vmDispatch(&s,&p,"touch-down")); assert(vmGetFloat(&s,0)>4.99f && vmGetFloat(&s,0)<5.01f); }
+  // div: 50 / 4 = 12
+  { auto d=makeTool(); exec1(d,"div","n",4); VmProgram p; VmState s; assert(vmCompile(d.as<JsonObject>(),&p)); vmStateInit(&s,&p);
+    assert(vmDispatch(&s,&p,"touch-down")); assert(vmGetInt(&s,0)==12); }
+  // div by zero guards -> 0 (no crash)
+  { auto d=makeTool(); exec1(d,"div","n",0); VmProgram p; VmState s; assert(vmCompile(d.as<JsonObject>(),&p)); vmStateInit(&s,&p);
+    assert(vmDispatch(&s,&p,"touch-down")); assert(vmGetInt(&s,0)==0); }
+  // mod: 50 % 8 = 2
+  { auto d=makeTool(); exec1(d,"mod","n",8); VmProgram p; VmState s; assert(vmCompile(d.as<JsonObject>(),&p)); vmStateInit(&s,&p);
+    assert(vmDispatch(&s,&p,"touch-down")); assert(vmGetInt(&s,0)==2); }
+  // mod by zero guards -> 0
+  { auto d=makeTool(); exec1(d,"mod","n",0); VmProgram p; VmState s; assert(vmCompile(d.as<JsonObject>(),&p)); vmStateInit(&s,&p);
+    assert(vmDispatch(&s,&p,"touch-down")); assert(vmGetInt(&s,0)==0); }
+  // clamp: init n=50, clamp [10,20] -> 20 (above hi)
+  { auto d=makeTool(); auto args=run(d).add<JsonObject>()["clamp"].to<JsonObject>(); args["slot"]="n"; args["min"]["lit"]=10; args["max"]["lit"]=20;
+    VmProgram p; VmState s; assert(vmCompile(d.as<JsonObject>(),&p)); vmStateInit(&s,&p);
+    assert(vmDispatch(&s,&p,"touch-down")); assert(vmGetInt(&s,0)==20); }
+  // clamp below hi: init n=5, clamp [10,20] -> 10
+  { auto d=makeTool(); d["state"][0]["init"]=5; auto args=run(d).add<JsonObject>()["clamp"].to<JsonObject>(); args["slot"]="n"; args["min"]["lit"]=10; args["max"]["lit"]=20;
+    VmProgram p; VmState s; assert(vmCompile(d.as<JsonObject>(),&p)); vmStateInit(&s,&p);
+    assert(vmDispatch(&s,&p,"touch-down")); assert(vmGetInt(&s,0)==10); }
+  // clamp inside: init n=15, [10,20] -> 15 unchanged
+  { auto d=makeTool(); d["state"][0]["init"]=15; auto args=run(d).add<JsonObject>()["clamp"].to<JsonObject>(); args["slot"]="n"; args["min"]["lit"]=10; args["max"]["lit"]=20;
+    VmProgram p; VmState s; assert(vmCompile(d.as<JsonObject>(),&p)); vmStateInit(&s,&p);
+    assert(vmDispatch(&s,&p,"touch-down")); assert(vmGetInt(&s,0)==15); }
+  // clamp reversed bounds still works (min>max -> swap)
+  { auto d=makeTool(); d["state"][0]["init"]=5; auto args=run(d).add<JsonObject>()["clamp"].to<JsonObject>(); args["slot"]="n"; args["min"]["lit"]=200; args["max"]["lit"]=10;
+    VmProgram p; VmState s; assert(vmCompile(d.as<JsonObject>(),&p)); vmStateInit(&s,&p);
+    assert(vmDispatch(&s,&p,"touch-down")); assert(vmGetInt(&s,0)==10); }
+}
 static void initialBranches() {
   for(int value : {0,1}) {
     auto d=makeTool(); d["state"][0]["init"]=value;
@@ -88,7 +128,7 @@ static void initialBranches() {
   }
 }
 int main(int argc,char** argv) {
-  limits(); renderLimit(); references(); progress(); initialBranches();
+  limits(); renderLimit(); references(); progress(); mathVerbs(); initialBranches();
   for(int i=1;i<argc;++i) {
     std::ifstream input(argv[i]); JsonDocument doc; assert(!deserializeJson(doc,input));
     VmProgram p; if(!vmCompile(doc.as<JsonObject>(),&p)) { std::cerr<<argv[i]<<": "<<p.compile_error<<"\n"; return 1; }

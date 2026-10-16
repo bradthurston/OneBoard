@@ -85,6 +85,10 @@ RULES (hard):
 VERBS (exactly one key per verb object):
 - {"add":{"slot":"s","delta":{"lit":N|"slot":s2|"noise":{"lo":N,"hi":N}}}}
 - {"sub":{"slot":"s","delta":...}}            same payload shapes
+- {"mul":{"slot":"s","value":{"lit":N|"slot":s2}}}     slot = slot * value
+- {"div":{"slot":"s","value":{"lit":N|"slot":s2}}}     slot = slot / value (value 0 -> 0)
+- {"mod":{"slot":"s","value":{"lit":N|"slot":s2}}}     slot = slot % value (value 0 -> 0)
+- {"clamp":{"slot":"s","min":{"lit":N},"max":{"lit":N}}}  slot = clamp(slot, min, max)
 - {"set":{"slot":"s","value":{"lit":N|"slot":s2}}}       (int64/bool)
 - {"setf":{"slot":"float_slot","value":...}}  (float slots)
 - {"toggle":{"slot":"bool_slot"}}

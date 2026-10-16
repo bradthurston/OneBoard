@@ -19,8 +19,8 @@ import json
 import sys
 
 # --- Vocabulary (mirrors src/vm.cpp — keep in sync) ---
-VERBS = {"add", "sub", "set", "setf", "toggle", "stamp", "now_minus", "random",
-         "format", "progress", "render", "if"}
+VERBS = {"add", "sub", "mul", "div", "mod", "clamp", "set", "setf", "toggle",
+         "stamp", "now_minus", "random", "format", "progress", "render", "if"}
 RENDER_TYPES = {"clear", "text", "rect", "fillrect", "line", "circle",
                 "bar", "graph"}
 GUARD_OPS = {"eq", "ne", "lt", "le", "gt", "ge", "is_true", "elapsed_ge",
@@ -206,8 +206,8 @@ class Behavior:
             return reads
         # slots a verb writes (its destination)
         def verb_writes(v):
-            for k in ("set", "setf", "add", "sub", "toggle", "stamp",
-                      "now_minus", "random", "format", "progress"):
+            for k in ("set", "setf", "add", "sub", "mul", "div", "mod", "clamp",
+                      "toggle", "stamp", "now_minus", "random", "format", "progress"):
                 if k in v and isinstance(v[k], dict) and isinstance(v[k].get("slot"), str):
                     return {v[k]["slot"]}
             return set()
@@ -271,6 +271,10 @@ class Behavior:
             self._check_set(ev_name, vname, p)
         elif vname in ("add", "sub"):
             self._check_addsub(ev_name, vname, p)
+        elif vname in ("mul", "div", "mod"):
+            self._check_muldivmod(ev_name, vname, p)
+        elif vname == "clamp":
+            self._check_clamp(ev_name, p)
         elif vname == "toggle":
             self._check_slot_ref(p.get("slot"), f"event '{ev_name}' toggle.slot")
         elif vname in ("stamp", "now_minus"):
@@ -320,6 +324,17 @@ class Behavior:
                 self._check_value(delta, f"event '{ev_name}' {vname}.delta")
         else:
             self.err(f"event '{ev_name}': {vname} missing 'delta'")
+
+    def _check_muldivmod(self, ev_name, vname, p):
+        # {slot, value} — dst = dst op value  (value = lit or slot)
+        self._check_slot_ref(p.get("slot"), f"event '{ev_name}' {vname}.slot")
+        self._check_value(p.get("value"), f"event '{ev_name}' {vname}.value")
+
+    def _check_clamp(self, ev_name, p):
+        # {slot, min, max} — dst = clamp(dst, min, max)
+        self._check_slot_ref(p.get("slot"), f"event '{ev_name}' clamp.slot")
+        self._check_value(p.get("min"), f"event '{ev_name}' clamp.min")
+        self._check_value(p.get("max"), f"event '{ev_name}' clamp.max")
 
     def _check_stamp(self, ev_name, vname, p):
         self._check_slot_ref(p.get("slot"), f"event '{ev_name}' {vname}.slot")

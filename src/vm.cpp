@@ -2,6 +2,8 @@
    OneBoard Stage 3 — VM compiler + executor
    ========================================================== */
 #include "vm.h"
+#include <math.h>   // fabsf (graph auto-scaling); Arduino builds pull it via core but
+                    // the native test stubs (tests/native/stubs/Arduino.h) don't.
 
 // ============================================================
 // Colour map (matches resolveColour in original main.cpp)
@@ -236,6 +238,64 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     instr->dst = (uint8_t)idx;
     instr->a_ty = parseSource(p["delta"], rootState, &instr->a_slot,
                                &instr->a_val, NULL);
+    prog->instr_count++;
+    return 1;
+  }
+
+  // --- mul ---  dst = dst * value
+  if (verb.containsKey("mul")) {
+    JsonObject p = verb["mul"];
+    const char* slotName = p["slot"];
+    int idx = resolveSlotIndex(rootState, slotName);
+    if (idx < 0) return compileFail(prog, "mul: unknown slot '%s'", slotName ? slotName : "(none)") ? -1 : -1;
+    instr->op = OP_MUL;
+    instr->dst = (uint8_t)idx;
+    instr->a_ty = parseSource(p["value"], rootState, &instr->a_slot,
+                               &instr->a_val, NULL);
+    prog->instr_count++;
+    return 1;
+  }
+
+  // --- div ---  dst = dst / value  (guard: zero value -> dst = 0)
+  if (verb.containsKey("div")) {
+    JsonObject p = verb["div"];
+    const char* slotName = p["slot"];
+    int idx = resolveSlotIndex(rootState, slotName);
+    if (idx < 0) return compileFail(prog, "div: unknown slot '%s'", slotName ? slotName : "(none)") ? -1 : -1;
+    instr->op = OP_DIV;
+    instr->dst = (uint8_t)idx;
+    instr->a_ty = parseSource(p["value"], rootState, &instr->a_slot,
+                               &instr->a_val, NULL);
+    prog->instr_count++;
+    return 1;
+  }
+
+  // --- mod ---  dst = dst % value  (guard: zero value -> dst = 0)
+  if (verb.containsKey("mod")) {
+    JsonObject p = verb["mod"];
+    const char* slotName = p["slot"];
+    int idx = resolveSlotIndex(rootState, slotName);
+    if (idx < 0) return compileFail(prog, "mod: unknown slot '%s'", slotName ? slotName : "(none)") ? -1 : -1;
+    instr->op = OP_MOD;
+    instr->dst = (uint8_t)idx;
+    instr->a_ty = parseSource(p["value"], rootState, &instr->a_slot,
+                               &instr->a_val, NULL);
+    prog->instr_count++;
+    return 1;
+  }
+
+  // --- clamp ---  dst = clamp(dst, min, max)
+  if (verb.containsKey("clamp")) {
+    JsonObject p = verb["clamp"];
+    const char* slotName = p["slot"];
+    int idx = resolveSlotIndex(rootState, slotName);
+    if (idx < 0) return compileFail(prog, "clamp: unknown slot '%s'", slotName ? slotName : "(none)") ? -1 : -1;
+    instr->op = OP_CLAMP;
+    instr->dst = (uint8_t)idx;
+    instr->a_ty = parseSource(p["min"], rootState, &instr->a_slot,
+                               &instr->a_val, NULL);
+    instr->b_ty = parseSource(p["max"], rootState, &instr->b_slot,
+                               &instr->b_val, NULL);
     prog->instr_count++;
     return 1;
   }
@@ -832,6 +892,52 @@ static int execInstr(VmState* state, const VmProgram* prog,
       state->ival[instr->dst] -= srcInt(state, instr->a_ty, instr->a_slot, instr->a_val);
       return 1;
 
+    case OP_MUL: {
+      const int64_t factor = srcInt(state, instr->a_ty, instr->a_slot, instr->a_val);
+      if (state->types[instr->dst] == SLOT_FLOAT)
+        state->fval[instr->dst] *= (float)factor;
+      else
+        state->ival[instr->dst] *= factor;
+      return 1;
+    }
+
+    case OP_DIV: {
+      const int64_t divisor = srcInt(state, instr->a_ty, instr->a_slot, instr->a_val);
+      if (divisor == 0) {  // guard: avoid divide-by-zero (-> 0)
+        if (state->types[instr->dst] == SLOT_FLOAT) state->fval[instr->dst] = 0.0f;
+        else state->ival[instr->dst] = 0;
+      } else if (state->types[instr->dst] == SLOT_FLOAT) {
+        state->fval[instr->dst] /= (float)divisor;
+      } else {
+        state->ival[instr->dst] /= divisor;
+      }
+      return 1;
+    }
+
+    case OP_MOD: {
+      const int64_t divisor = srcInt(state, instr->a_ty, instr->a_slot, instr->a_val);
+      if (divisor == 0) state->ival[instr->dst] = 0;  // guard: no % by zero
+      else state->ival[instr->dst] %= divisor;
+      return 1;
+    }
+
+    case OP_CLAMP: {
+      const int64_t lo = srcInt(state, instr->a_ty, instr->a_slot, instr->a_val);
+      const int64_t hi = srcInt(state, instr->b_ty, instr->b_slot, instr->b_val);
+      int64_t loV = lo < hi ? lo : hi;
+      int64_t hiV = lo < hi ? hi : lo;
+      if (state->types[instr->dst] == SLOT_FLOAT) {
+        float v = state->fval[instr->dst];
+        if (v < (float)loV) state->fval[instr->dst] = (float)loV;
+        else if (v > (float)hiV) state->fval[instr->dst] = (float)hiV;
+      } else {
+        int64_t v = state->ival[instr->dst];
+        if (v < loV) state->ival[instr->dst] = loV;
+        else if (v > hiV) state->ival[instr->dst] = hiV;
+      }
+      return 1;
+    }
+
     case OP_SET: {
       if (instr->a_ty == SRC_SLOT && state->types[instr->a_slot] == SLOT_STRING &&
           state->types[instr->dst] == SLOT_STRING) {
@@ -1144,10 +1250,12 @@ void vmRender(VmState* state, const VmProgram* prog, TFT_eSPI* tft) {
         break;
 
       case R_GRAPH: {
-        // Rolling line graph (temp-logger)
-        float currentTemp = state->fval[rp->src_slot];
+        // Rolling line graph, Y auto-scaled to the observed data range in the
+        // ring buffer. The value comes from the graph's src slot (pushed once
+        // per render). No hardcoded axis — graphs any float slot's range.
+        float val = state->fval[rp->src_slot];
         int gh = state->graph_head;
-        state->graph_hist[gh] = currentTemp;
+        state->graph_hist[gh] = val;
         state->graph_head = (gh + 1) % VM_GRAPH_SIZE;
         if (state->graph_count < VM_GRAPH_SIZE) state->graph_count++;
 
@@ -1158,18 +1266,38 @@ void vmRender(VmState* state, const VmProgram* prog, TFT_eSPI* tft) {
 
         tft->drawRect(gx, gy, gw, gh_h, TFT_DARKGREY);
 
+        // Auto-scale Y across the samples currently in the buffer.
+        float vmin = 0.0f, vmax = 0.0f;
         int n = state->graph_count;
+        int start = (state->graph_head - n + VM_GRAPH_SIZE) % VM_GRAPH_SIZE;
+        if (n > 1) {
+          vmin = vmax = state->graph_hist[start];
+          for (int i = 1; i < n; i++) {
+            float v = state->graph_hist[(start + i) % VM_GRAPH_SIZE];
+            if (v < vmin) vmin = v;
+            if (v > vmax) vmax = v;
+          }
+          // Add a little headroom so the trace doesn't hug the frame edges,
+          // and never collapse a flat signal into zero height.
+          const float pad = (vmax - vmin) > 0.0001f ? (vmax - vmin) * 0.1f
+                                                    : (fabsf(vmin) > 0 ? 0.1f * fabsf(vmin) : 1.0f);
+          vmin -= pad; vmax += pad;
+        }
+
         if (n > 1) {
           int drawW = gw / (n - 1);
           if (drawW < 1) drawW = 1;
           if (drawW > 4) drawW = 4;
-          int start = (state->graph_head - n + VM_GRAPH_SIZE) % VM_GRAPH_SIZE;
+          float span = (vmax - vmin) > 0.0001f ? (vmax - vmin) : 1.0f;
           for (int i = 0; i < n - 1; i++) {
             int idx0 = (start + i) % VM_GRAPH_SIZE;
             int idx1 = (start + i + 1) % VM_GRAPH_SIZE;
             float v0 = state->graph_hist[idx0], v1 = state->graph_hist[idx1];
-            int y0 = botY - (int)(((v0 - 60.0f) / 30.0f) * gh_h);
-            int y1 = botY - (int)(((v1 - 60.0f) / 30.0f) * gh_h);
+            float frac0 = (v0 - vmin) / span, frac1 = (v1 - vmin) / span;
+            if (frac0 < 0.0f) frac0 = 0.0f; else if (frac0 > 1.0f) frac0 = 1.0f;
+            if (frac1 < 0.0f) frac1 = 0.0f; else if (frac1 > 1.0f) frac1 = 1.0f;
+            int y0 = botY - (int)(frac0 * gh_h);
+            int y1 = botY - (int)(frac1 * gh_h);
             int x0 = gx + i * drawW, x1 = gx + (i + 1) * drawW;
             if (x0 >= gx && x1 <= gx + gw)
               tft->drawLine(x0, y0, x1, y1, TFT_GREEN);
