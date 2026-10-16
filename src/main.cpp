@@ -88,18 +88,57 @@ void touchBegin() {
   touch.setRotation(0);   /* portrait 240x320 — matches the tool definitions */
 }
 
+/* Touch calibration — measured on THIS board (2026-10-16, /touch corner taps).
+   Raw X→screen-x and raw Y→screen-y directly (NO axis swap): a tap at
+   top-left gives raw [289,219], bottom-right gives [3740,3685]. The usable
+   raw range (~289..3740 X, ~219..3685 Y) is far narrower than 0..4095, so a
+   naive raw*240/4096 map is offset. Full-screen tools masked it; the
+   row-accurate home list exposed it (taps landed on the wrong tool). */
+#define TX_MIN 289
+#define TX_MAX 3740
+#define TY_MIN 219
+#define TY_MAX 3685
+
+/* Raw touch state (last read), exposed via /touch */
+volatile int  lastRawX = -1, lastRawY = -1, lastRawZ = 0;
+// Ring buffer of recent raw taps (i, i indexes), so /touch can return all four
+// calibration corners in one shot instead of only the last tap.
+#define TOUCH_BUF 16
+volatile int  tapBufX[TOUCH_BUF], tapBufY[TOUCH_BUF], tapBufZ[TOUCH_BUF];
+volatile int  tapBufN = 0;
+
 /* Returns true + screen coords (portrait 240x320) on press. Stock lib does the
-   heavy lifting (Z1/Z2 pressure, oversampling, power-down); we map its raw
-   rotation-0 output (0..4095) to the screen. */
+   heavy lifting (Z1/Z2 pressure, oversampling, power-down). We ALSO stash the
+   raw sensor point so /touch can report it for calibration.
+   NOTE: the current mapping (raw*240/4096) is a linear placeholder — Brad
+   reported home-list taps land on the wrong tool, which is a touch OFFSET,
+   not a tool bug. Full-screen tools mask it; accurate row taps expose it.
+   To fix: sample /touch at the four corners, derive the real per-axis bounds
+   + axis rotation, then replace this mapping (see wiki CYD Reference: this
+   sensor is ~X 200..3700, Y 240..3800, not 0..4095). */
 static bool touchReadScreen(uint16_t *sx, uint16_t *sy) {
-  if (!(touch.tirqTouched() && touch.touched())) return false;
+  // held reset: when the panel reports no press, the prior press ended.
+  static bool held = false;
+  if (!(touch.tirqTouched() && touch.touched())) { held = false; return false; }
   TS_Point p = touch.getPoint();
-  if (p.z < 300) return false;
-  /* rotation 0: xraw=4095-y, yraw=x (raw 0..4095) → screen 240 wide / 320 tall */
-  uint32_t rx = (uint32_t)p.x * 240 / 4096;
-  uint32_t ry = (uint32_t)p.y * 320 / 4096;
-  if (rx >= 240) rx = 239;
-  if (ry >= 320) ry = 319;
+  if (p.z < 300) { held = false; return false; }
+  lastRawX = p.x; lastRawY = p.y; lastRawZ = p.z;
+  // Capture one raw sample per PRESS (rising edge), not per 5ms loop read —
+  // a single hold otherwise floods the buffer with jitter and swallows the
+  // other calibration corners. held tracks press state.
+  if (!held) {
+    if (tapBufN < TOUCH_BUF) {
+      tapBufX[tapBufN] = p.x; tapBufY[tapBufN] = p.y; tapBufZ[tapBufN] = p.z;
+      tapBufN++;
+    }
+    held = true;
+  }
+  // Calibrated linear mapping: raw X/Y sweep the full screen across the
+  // measured usable range, clamping to edges.
+  int32_t rx = ((int32_t)p.x - TX_MIN) * 240 / (TX_MAX - TX_MIN);
+  int32_t ry = ((int32_t)p.y - TY_MIN) * 320 / (TY_MAX - TY_MIN);
+  if (rx < 0) rx = 0; else if (rx > 239) rx = 239;
+  if (ry < 0) ry = 0; else if (ry > 319) ry = 319;
   *sx = (uint16_t)rx;
   *sy = (uint16_t)ry;
   return true;
@@ -157,8 +196,8 @@ String        lastLoadError = "";   // human-readable reason for the last failed
 bool          homeMode = false;      // true = showing the home/tool menu
 #define HOME_BTN_X 0                 // top-left corner: reserved for home
 #define HOME_BTN_Y 0
-#define HOME_BTN_W 28
-#define HOME_BTN_H 28
+#define HOME_BTN_W 22
+#define HOME_BTN_H 22
 #define HOME_LIST_MAX 24             // tools we can list (store + builtins)
 #define HOME_ROW_H 30                // vertical pitch of each tool row
 #define HOME_LIST_Y 44               // first row's y (below title)
@@ -436,11 +475,11 @@ static int loadStoreToolList() {
 void drawHomeButton() {
   tft.fillRect(HOME_BTN_X, HOME_BTN_Y, HOME_BTN_W, HOME_BTN_H, TFT_DARKGREY);
   tft.drawRect(HOME_BTN_X, HOME_BTN_Y, HOME_BTN_W, HOME_BTN_H, TFT_YELLOW);
-  // roof (triangle) + body (rect) = a house
-  tft.fillTriangle(HOME_BTN_X + 3,  HOME_BTN_Y + 12,
-                   HOME_BTN_X + 14, HOME_BTN_Y + 3,
-                   HOME_BTN_X + 25, HOME_BTN_Y + 12, TFT_YELLOW);
-  tft.fillRect(HOME_BTN_X + 5, HOME_BTN_Y + 12, 18, 12, TFT_YELLOW);
+  // roof (triangle) + body (rect) = a house, sized to fit the smaller button
+  tft.fillTriangle(HOME_BTN_X + 2,  HOME_BTN_Y + 9,
+                   HOME_BTN_X + 11, HOME_BTN_Y + 2,
+                   HOME_BTN_X + 20, HOME_BTN_Y + 9, TFT_YELLOW);
+  tft.fillRect(HOME_BTN_X + 4, HOME_BTN_Y + 9, 14, 10, TFT_YELLOW);
 }
 
 // Show the home screen (title + list of tools). Scrolls when > rows fit.
@@ -613,6 +652,45 @@ void handleLoad() {
     return;
   }
   server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing id\"}");
+}
+
+void handleTouchDebug() {
+  String json = "{\"raw\":[";
+  json += lastRawX;
+  json += ",";
+  json += lastRawY;
+  json += "],\"z\":";
+  json += lastRawZ;
+  json += ",\"taps\":[";
+  for (int i = 0; i < tapBufN; i++) {
+    if (i) json += ",";
+    json += "[";
+    json += tapBufX[i]; json += ","; json += tapBufY[i];
+    json += "]";
+  }
+  json += "],\"count\":";
+  json += tapBufN;
+  json += "}";
+  server.send(200, "application/json", json);
+}
+
+void handleTouchMap() {
+  // Report where the last press maps in calibrated screen coords — the live
+  // proof the mapping is right (raw bottom-right → ~[239,319], top-left → [0,0]).
+  uint16_t sx = 999, sy = 999;
+  if (lastRawX >= 0 && lastRawY >= 0) {
+    int32_t rx = ((int32_t)lastRawX - TX_MIN) * 240 / (TX_MAX - TX_MIN);
+    int32_t ry = ((int32_t)lastRawY - TY_MIN) * 320 / (TY_MAX - TY_MIN);
+    if (rx < 0) rx = 0; else if (rx > 239) rx = 239;
+    if (ry < 0) ry = 0; else if (ry > 319) ry = 319;
+    sx = (uint16_t)rx; sy = (uint16_t)ry;
+  }
+  String json = "{\"screen\":[";
+  json += sx; json += ","; json += sy;
+  json += "],\"raw\":[";
+  json += lastRawX; json += ","; json += lastRawY;
+  json += "]}";
+  server.send(200, "application/json", json);
 }
 
 void handleWifi() {
@@ -858,6 +936,8 @@ void setup() {
   server.on("/schema",  handleSchema);
   server.on("/store",   handleStore);
   server.on("/delete",  handleDelete);
+  server.on("/touch",   handleTouchDebug);
+  server.on("/touchmap", handleTouchMap);
   server.on("/wifi",    handleWifi);
   server.onNotFound(handleNotFound);
   server.begin();
