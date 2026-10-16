@@ -2,7 +2,10 @@
 """
 OneBoard Behavior Store — dead-simple static JSON host.
 
-Serves the ../behaviors/ directory as individual JSON files.
+Serves the ../behaviors/ directory as individual JSON files, and advertises
+itself over mDNS as _oneboard-store._tcp.local so boards find it without being
+told an address (see mdns_advertise.py; disable with --no-mdns).
+
 Usage:
     ./serve.py                    # default port 8080
     ./serve.py --port 9090
@@ -15,6 +18,8 @@ import re
 import sys
 import argparse
 import urllib.parse
+
+from mdns_advertise import StoreAdvertiser, SERVICE_TYPE
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BEHAVIORS_DIR = os.path.normpath(os.path.join(HERE, "..", "behaviors"))
@@ -102,16 +107,37 @@ def main():
     parser = argparse.ArgumentParser(description="OneBoard Behavior Store")
     parser.add_argument("--port", "-p", type=int, default=8080, help="Port (default 8080)")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host (default 0.0.0.0)")
+    parser.add_argument("--no-mdns", action="store_true",
+                        help="Don't advertise over mDNS (boards then need the URL typed in)")
+    parser.add_argument("--mdns-name", type=str, default="OneBoard Store",
+                        help="mDNS service instance name (default 'OneBoard Store')")
     args = parser.parse_args()
 
     server = http.server.HTTPServer((args.host, args.port), BehaviorHandler)
     print(f"OneBoard Behavior Store @ http://{args.host}:{args.port}/")
     print(f"Serving: {BEHAVIORS_DIR}/")
+
+    # Advertise so boards find the store on their own. This is the difference
+    # between a board that works after provisioning and one whose user has to
+    # type an IP address into a form. Non-fatal if it fails: the manual URL
+    # still exists as a fallback.
+    adv = None
+    if not args.no_mdns:
+        try:
+            adv = StoreAdvertiser(port=args.port, instance=args.mdns_name).start()
+            print(f"mDNS: advertising {SERVICE_TYPE}")
+            print(f"      boards will find it at http://{adv.ip}:{args.port}/")
+        except Exception as exc:
+            adv = None
+            print(f"mDNS: not advertising ({exc}) — boards will need the URL set manually")
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nShutting down.")
         server.server_close()
+        if adv:
+            adv.stop()
 
 
 if __name__ == "__main__":

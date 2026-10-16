@@ -110,7 +110,9 @@ what is not broken here.
 - `board_view.html` — any-client screen renderer (browser)
 - `oneboard_bot.py` — Telegram control (installed as a systemd user service
   by `install.sh --with-telegram`)
-- `serve.py` — the behavior store (this machine, port 8082)
+- `serve.py` — the behavior store (this machine, port 8082); advertises itself
+  over mDNS so boards find it without being told an address
+- `mdns_advertise.py` — stdlib-only mDNS/DNS-SD responder (`_oneboard-store._tcp.local`)
 
 ---
 
@@ -157,12 +159,14 @@ Full authoring reference: [`docs/BEHAVIOR-AUTHORING.md`](docs/BEHAVIOR-AUTHORING
 | Endpoint | Purpose |
 |---|---|
 | `/` | Self-describing web page (tools render dynamically from the store) |
-| `/status` | `{tool, store_url, loaded, wifi, provisioning, ip}` |
+| `/status` | `{tool, store_url, loaded, wifi, provisioning, ip, store_auto, store_found}` |
 | `/state` | Live VM slots (`name, type, value`) + render primitives |
 | `/schema` | The VM vocabulary — what an LLM needs to author a behavior |
 | `/load?id=<tool>` | Compile + run a behavior from the store |
 | `/delete?id=<tool>` | Purge a tool's cached copy from the board's LittleFS (the store's DELETE is authoritative) |
-| `/store?url=...` | Point the board at a behavior store |
+| `/store?url=...` | Point the board at a behavior store by hand (switches automatic discovery off) |
+| `/store?auto=1` | Re-enable automatic discovery and go look for a store now |
+| `/discover` | Browse mDNS for a store, on demand |
 | `/wifi?ssid=&pass=` | Join home WiFi (persisted in NVS; never in the repo) |
 | `/scan` | Nearby 2.4 GHz networks as JSON — powers the setup page's pick-a-network list. `/scan?start=1` begins an async scan; poll `/scan` until `state` is `done` |
 

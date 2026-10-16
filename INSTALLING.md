@@ -149,17 +149,32 @@ cd OneBoard
 python3 store/serve.py --port 8082
 ```
 
-Then tell the board where the store lives (web page → **Set Store URL**):
+Then the board finds it by itself — nothing to type. `serve.py` advertises
+itself over mDNS as `_oneboard-store._tcp.local` and the board browses for that
+on every boot.
 
+```bash
+python3 store/serve.py --port 8082
+#   OneBoard Behavior Store @ http://0.0.0.0:8082/
+#   mDNS: advertising _oneboard-store._tcp.local
+#         boards will find it at http://192.168.1.169:8082/
 ```
-http://192.168.1.169:8082
-```
 
-(Use the store machine's actual LAN IP. If port 8080 is free on your network
-you can run `--port 8080` instead.)
+That last line tells you the address the boards will use. Look-up happens fresh
+each boot, so if the store machine's address ever changes the board just finds
+it again — nothing to re-configure.
 
-Verify: browse to `http://<board-ip>/` — the **Tools** list should populate
-from the store automatically.
+Verify: browse to `http://<board-ip>/` — the **Tools** list should populate from
+the store on its own, and **Store** should read "Found automatically".
+
+**If it doesn't find it** (store on a different subnet, or mDNS blocked on your
+network), set it by hand: web page → **Store URL (manual override)**. A manual
+URL switches automatic discovery off, because an address you typed is a
+deliberate choice; **Find store automatically** switches it back on. You can also
+run `--no-mdns` if you'd rather a store stay unadvertised.
+
+`python3 store/mdns_advertise.py --port 8082` advertising on its own is handy for
+testing: `avahi-browse -rt _oneboard-store._tcp` should print the record.
 
 ---
 
@@ -260,7 +275,7 @@ with live state and a "simulate tap" button.
 | `ModuleNotFoundError: No module named 'telegram'` | Run the bot with `.venv/bin/python`, not system python (step 9.3). |
 | Author tool returns empty / stalls | DeepSeek on OpenRouter can burn its budget on invisible reasoning — the tool already sends `reasoning:{enabled:false}`; make sure your key has credit. |
 | Captive portal page doesn't auto-open | Browse manually to `http://192.168.4.1` after joining the AP. |
-| **Store tool list is empty / "store isn't loading"** | The board ships pointing at `http://192.168.4.100:8080`, an address that only exists while it is in AP mode — so a freshly provisioned board can never reach a store. Point it at wherever `store/serve.py` is actually running: `curl -G "http://<board-ip>/store" --data-urlencode "url=http://<your-pc-ip>:8082"`. It persists in NVS, but an erase wipes it, so a from-scratch board needs it again. Note the store must be on the **same LAN** as the board, the port must match (`--port 8082` here because 8080 was taken), and if your PC's IP is DHCP it can move and break the link again — reserve it. |
+| **Store tool list is empty / "store isn't loading"** | The board finds the store over mDNS by itself (`_oneboard-store._tcp.local`), so first check that `serve.py` printed `mDNS: advertising...` at startup — `--no-mdns`, a store on another subnet, or a network that filters multicast will all stop discovery. If discovery can't work on your network, set the URL by hand: web page → **Store URL (manual override)**, or `curl -G "http://<board-ip>/store" --data-urlencode "url=http://<your-pc-ip>:8082"`. Note: a manual URL **switches automatic discovery off** (an address you typed should win), and **Find store automatically** turns it back on. `/status` reports `store_auto` and `store_found` so you can see which is in play. Also check the port matches (`--port 8082` here, because 8080 was taken). |
 
 ---
 

@@ -12,6 +12,7 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
+#include <ESPmDNS.h>
 #include <SPI.h>
 #include <XPT2046_Touchscreen.h>
 
@@ -153,6 +154,7 @@ static bool touchReadScreen(uint16_t *sx, uint16_t *sy) {
 #define WIFI_SSID_KEY   "w_ssid"
 #define WIFI_PASS_KEY   "w_pass"
 #define STORE_KEY       "store_url"
+#define STORE_AUTO_KEY  "store_auto"
 #define ACTIVE_KEY      "active_tool"
 
 /* Defaults */
@@ -176,6 +178,59 @@ bool          provisioningMode = false;  // no WiFi saved yet — captive portal
 
 String        activeToolId = DEFAULT_TOOL;
 String        storeUrl     = DEFAULT_STORE;
+// When true (the default) the board browses mDNS for a store on every boot and
+// uses whatever it finds, so nobody has to type an address. Setting a URL by
+// hand turns this off — an explicit choice should win.
+bool          storeAuto    = true;
+bool          storeFound   = false;   // did discovery find one this boot?
+bool          mdnsStarted  = false;
+
+/* ==========================================================
+   Store discovery — find the store instead of being told where it is.
+
+   A fresh board's compiled store address (DEFAULT_STORE) points at an AP-mode
+   address that cannot exist once the board joins a real network. Without this,
+   every new user has to hand-type an IP into the setup form and gets nothing
+   until they do.
+
+   So the store advertises itself as _oneboard-store._tcp.local (see
+   store/mdns_advertise.py) and the board browses for it. The discovered URL is
+   deliberately NOT persisted: looking it up fresh on every boot means a store
+   host whose DHCP address moved gets re-found automatically instead of silently
+   breaking.
+
+   queryService() blocks for up to ~3s, so this runs at boot and from explicit
+   endpoints — never from a hot path.
+   ========================================================== */
+static bool ensureMdns() {
+  if (mdnsStarted) return true;
+  if (!WiFi.isConnected()) return false;     // nothing to browse from
+  mdnsStarted = MDNS.begin("oneboard");      // also gives us oneboard.local
+  return mdnsStarted;
+}
+
+// "http://ip:port" for the first store that answers, or "" if none do.
+String discoverStore() {
+  if (!ensureMdns()) return "";
+  int n = MDNS.queryService("oneboard-store", "tcp");
+  if (n <= 0) return "";
+  String ip = MDNS.IP(0).toString();
+  uint16_t p = MDNS.port(0);
+  if (ip.length() == 0 || ip == "0.0.0.0") return "";
+  if (p == 0) p = 8080;
+  return "http://" + ip + ":" + String(p);
+}
+
+// Adopt a discovered store. Returns true if one answered.
+bool applyStoreDiscovery() {
+  if (!storeAuto) return false;
+  String url = discoverStore();
+  if (url.length() == 0) { storeFound = false; return false; }
+  storeUrl   = url;
+  storeFound = true;
+  Serial.print("Store found: "); Serial.println(storeUrl);
+  return true;
+}
 
 // Stage 3 compiled VM — program + runtime state
 VmProgram     g_prog;
@@ -804,9 +859,13 @@ void handleRoot() {
       "<div id='wifiStatus' style='font-size:0.8em;color:#888'></div>"
     "</div>"
     "<div style='margin-top:18px;border-top:1px solid #444;padding-top:12px'>"
+      "<div style='font-size:0.9em;color:#4af;margin-bottom:6px'>Store</div>"
+      "<div class='hint'>The board looks for a store on your network by itself. Only touch this if you run the store somewhere it can't find.</div>"
+      "<button onclick='findStore()' id='findBtn' style='background:#333;border-color:#4af'>Find store automatically</button>"
+      "<div id='storeStatus' style='font-size:0.8em;color:#888;margin-bottom:8px'></div>"
       "<input id='storeInput' type='text' style='width:100%;max-width:280px;padding:8px;background:#222;color:#fff;border:1px solid #555'"
-        " placeholder='Store URL' />"
-      "<button onclick='setStore()' style='background:#333;border-color:#4af'>Set Store URL</button>"
+        " placeholder='Store URL (manual override)' />"
+      "<button onclick='setStore()' style='background:#333'>Set Store URL manually</button>"
     "</div>"
     "<div class='footer'>OneBoard — CYD 2432S028 (self-describing)</div>"
     "<script>"
@@ -833,13 +892,33 @@ void handleRoot() {
           "})"
         "}catch(e){document.getElementById('toolList').innerText='store unreachable'}"
       "}"
+      "async function findStore(){"
+        "var st=document.getElementById('storeStatus');"
+        "st.innerText='Looking for a store on your network (a few seconds)...';"
+        "try{"
+          "var r=await fetch('/store?auto=1');"   // also re-enables auto discovery
+          "var j=await r.json();"
+          "if(j.found){"
+            "st.innerText='Found: '+j.url;"
+            "document.getElementById('storeLabel').innerText='Store: '+j.url;"
+            "document.getElementById('storeInput').value=j.url;"
+            "renderTools(j.url)"
+          "}else{"
+            "st.innerText='No store found. Start store/serve.py, then try again - or set the URL below.'"
+          "}"
+        "}catch(e){st.innerText='Discovery failed - set the URL below.'}"
+      "}"
       "async function setStore(){"
         "var v=document.getElementById('storeInput').value.trim();"
         "if(!v)return;"
         "try{"
           "var r=await fetch('/store?url='+encodeURIComponent(v));"
           "var j=await r.json();"
-          "if(j.ok)document.getElementById('storeLabel').innerText='Store: '+j.url"
+          "if(j.ok){"
+            "document.getElementById('storeLabel').innerText='Store: '+j.url;"
+            "document.getElementById('storeStatus').innerText="
+              "'Manual URL set - automatic discovery is now off. Use Find store automatically to go back.'"
+          "}"
         "}catch(e){alert('Failed')}"
       "}"
       "var scanTimer=null;"
@@ -897,6 +976,10 @@ void handleRoot() {
         "document.getElementById('current').innerText='Tool: '+j.tool;"
         "document.getElementById('storeLabel').innerText='Store: '+j.store_url + (j.wifi?' | WiFi IP: '+j.ip:'');"
         "document.getElementById('storeInput').value=j.store_url;"
+        "document.getElementById('storeStatus').innerText="
+          "j.store_found?'Found automatically - nothing to do.'"
+          ":(j.store_auto?'No store answered. Start store/serve.py and tap Find store automatically.'"
+          ":'Automatic discovery is off (manual URL).');"
         "if(j.provisioning){document.getElementById('provBanner').style.display='block';scanWifi()}"
         "renderTools(j.store_url);"
         "var b=document.getElementById('btn-'+j.tool);"
@@ -1085,11 +1168,19 @@ void handleWifi() {
     saveConfigStr(WIFI_PASS_KEY, pass.c_str());
     bool ok = wifiStationConnect(false);
     if (ok) provisioningMode = false;  // done setting up
+    // We're on the network now — go find the store before answering, so the page
+    // that reloads after this sees a working one. Costs up to ~3s if nothing
+    // answers, which is why the page says "Joining...".
+    if (ok) applyStoreDiscovery();
     String ip = ok ? WiFi.localIP().toString() : "";
     String json = "{\"ok\":";
     json += ok ? "true" : "false";
     json += ",\"ssid\":\"" + ssid + "\"";
-    json += ",\"ip\":\"" + ip + "\"}";
+    json += ",\"ip\":\"" + ip + "\"";
+    json += ",\"store\":\"" + storeUrl + "\"";
+    json += ",\"store_found\":";
+    json += storeFound ? "true" : "false";
+    json += "}";
     server.send(200, "application/json", json);
     return;
   }
@@ -1111,6 +1202,10 @@ void handleStatus() {
   json += wifiStationOk ? WiFi.localIP().toString() : "";
   json += "\",\"home\":";
   json += homeMode ? "true" : "false";
+  json += ",\"store_auto\":";
+  json += storeAuto ? "true" : "false";
+  json += ",\"store_found\":";
+  json += storeFound ? "true" : "false";
   json += "}";
   server.send(200, "application/json", json);
 }
@@ -1225,14 +1320,46 @@ void handleDelete() {
 }
 
 void handleStore() {
+  // /store?auto=1  -> re-enable discovery and go looking for a store right now
+  // /store?auto=0  -> stop discovery from replacing the configured URL
+  if (server.hasArg("auto")) {
+    storeAuto = (server.arg("auto") != "0");
+    saveConfigStr(STORE_AUTO_KEY, storeAuto ? "1" : "0");
+    bool found = storeAuto ? applyStoreDiscovery() : false;
+    String json = "{\"ok\":true,\"auto\":";
+    json += storeAuto ? "true" : "false";
+    json += ",\"found\":";
+    json += found ? "true" : "false";
+    json += ",\"url\":\"" + storeUrl + "\"}";
+    server.send(200, "application/json", json);
+    return;
+  }
   if (server.hasArg("url")) {
     storeUrl = server.arg("url");
     saveConfigStr(STORE_KEY, storeUrl.c_str());
-    String json = "{\"ok\":true,\"url\":\"" + storeUrl + "\"}";
+    // An address typed in by hand is a deliberate choice, so it wins: turn
+    // discovery off rather than let the next boot silently replace it.
+    storeAuto  = false;
+    storeFound = false;
+    saveConfigStr(STORE_AUTO_KEY, "0");
+    String json = "{\"ok\":true,\"url\":\"" + storeUrl + "\",\"auto\":false}";
     server.send(200, "application/json", json);
     return;
   }
   server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing url\"}");
+}
+
+/* /discover — browse for the store on demand (the setup page's button).
+   Reads the same records the board uses at boot.~3s worst case. */
+void handleDiscover() {
+  bool found = applyStoreDiscovery();
+  String json = "{\"found\":";
+  json += found ? "true" : "false";
+  json += ",\"auto\":";
+  json += storeAuto ? "true" : "false";
+  json += ",\"url\":\"" + storeUrl + "\"}";
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json", json);
 }
 
 void handleNotFound() {
@@ -1286,6 +1413,7 @@ void setup() {
   touchBegin();
 
   storeUrl = loadConfigStr(STORE_KEY, DEFAULT_STORE);
+  storeAuto = loadConfigStr(STORE_AUTO_KEY, "1") != "0";
   activeToolId = loadConfigStr(ACTIVE_KEY, DEFAULT_TOOL);
 
   // Provisioning mode: no saved WiFi creds -> keep the captive portal as the
@@ -1293,6 +1421,12 @@ void setup() {
   provisioningMode = (loadConfigStr(WIFI_SSID_KEY, "").length() == 0);
 
   tryStationConnect();
+
+  // Find the store on our own instead of waiting to be told where it is. Costs
+  // up to ~3s of boot time when nothing answers, and is a no-op if discovery is
+  // off or we have no network. Nothing is persisted, so a store host whose
+  // address changed is picked up again on the next boot.
+  applyStoreDiscovery();
 
   WiFi.softAP(SOFT_AP_SSID, SOFT_AP_PSK);
 
@@ -1325,6 +1459,7 @@ void setup() {
   server.on("/touch",   handleTouchDebug);
   server.on("/touchmap", handleTouchMap);
   server.on("/scan",    handleScan);
+  server.on("/discover", handleDiscover);
   server.on("/wifi",    handleWifi);
   server.onNotFound(handleNotFound);
   server.begin();

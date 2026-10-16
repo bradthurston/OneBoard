@@ -36,6 +36,12 @@ jobs:
       - name: Firmware builtins match behaviors/
         run: python3 tools/check_builtins.py
 
+      # The store's mDNS advertisement is what lets a board find it without
+      # being told an address. These tests check the wire format offline, so
+      # they run anywhere — no multicast, no daemon.
+      - name: Store mDNS packet tests
+        run: python3 store/test_mdns.py
+
   vm-regression:
     name: VM regression tests
     runs-on: ubuntu-latest
