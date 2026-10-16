@@ -80,7 +80,41 @@ class Behavior:
                 self._check_event(ev)
         else:
             self.err("'events' must be an array")
+        # Semantic guard: a behavior that never renders draws a BLANK screen.
+        # It loads "ok" (the VM compiles fine) but the panel stays blank — the
+        # exact trap hit on the first tele-authorized multiplication tool.
+        # Require at least one render verb across all handlers, else fail.
+        renders = self._count_renders(d.get("events", []))
+        if renders == 0:
+            self.err("behavior contains no render verb — it will draw a blank "
+                     "screen. Add {\"render\":{...}} (start with a clear) to at "
+                     "least one handler.")
         return self
+
+    # ---------------------------------------------------------------
+    def _count_renders(self, events):
+        """Count render verbs across ALL handlers, recursing into if/then/else.
+        A behavior with zero renders anywhere draws a blank screen."""
+        count = 0
+        def walk(run):
+            nonlocal count
+            for verb in run or []:
+                if not isinstance(verb, dict):
+                    continue
+                if "render" in verb:
+                    count += 1
+                if "if" in verb and isinstance(verb["if"], dict):
+                    walk(verb["if"].get("then"))
+                    walk(verb["if"].get("else"))
+        for ev in events or []:
+            if not isinstance(ev, dict):
+                continue
+            run = None
+            # render could sit in a handler's run, or in a nested event shape
+            for h in ev.get("handlers", []) or []:
+                if isinstance(h, dict):
+                    walk(h.get("run"))
+        return count
 
     # ---------------------------------------------------------------
     def _check_state(self, s):
