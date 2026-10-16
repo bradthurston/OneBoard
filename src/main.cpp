@@ -20,7 +20,7 @@
 /* ==========================================================
    Configuration — board variant. Everything board-specific is overridable
    via build_flags so the same firmware serves the common CYD family. The
-   verified default is the ESP32-2432S028R (HaleHound). See VARIANTS.md for
+   verified default is the ESP32-2432S028R. See VARIANTS.md for
    the pin table + sources.
    ========================================================== */
 #ifndef TFT_BL
@@ -60,7 +60,7 @@
    XPT2046 touch — SEPARATE SPI instance (VSPI), independent of the TFT (HSPI).
    This board (2432S028R / E32R28T): SCLK25 MOSI32 MISO39 CS33 IRQ36.
    Uses the stock XPT2046_Touchscreen library on its own VSPI bus — the SAME
-   proven profile the working firmwares (Bruce / HaleHound / Wireless Wizard)
+   proven profile the working firmwares (Bruce / Wireless Wizard)
    use. Requires USE_HSPI_PORT in build flags so the display owns HSPI and the
    touch owns VSPI (without it both fight for VSPI and touch never reads).
    ========================================================== */

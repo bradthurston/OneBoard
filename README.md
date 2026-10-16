@@ -39,7 +39,7 @@ self-description: a web page, a Telegram bot, or an LLM.
 
 | | |
 |---|---|
-| Board | CYD ESP32-2432S028R (HaleHound / "cheap yellow display") |
+| Board | CYD ESP32-2432S028R ("cheap yellow display") |
 | Display | ILI9341 240×320 portrait, `setRotation(0)`, no inversion |
 | Touch | XPT2046 on separate VSPI (CS33/MOSI32/MISO39/CLK25/IRQ36), 250 ms debounce, one event per press, no pull-up on IRQ36 |
 | Display SPI | HSPI (MISO12/MOSI13/SCLK14/CS15/DC2/RST=-1/BL21) — `USE_HSPI_PORT` mandatory |
