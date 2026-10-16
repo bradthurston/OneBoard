@@ -25,7 +25,7 @@ On a Debian/Ubuntu, Fedora, or Arch machine you can skip most of the manual
 setup. Clone the repo and run:
 
 ```bash
-git clone https://github.com/bradthurston-creator/OneBoard.git
+git clone https://github.com/bradthurston/OneBoard.git
 cd OneBoard
 ./install.sh
 ```
@@ -80,7 +80,7 @@ pio --version
 ## 4. Get the code
 
 ```bash
-git clone https://github.com/bradthurston-creator/OneBoard.git
+git clone https://github.com/bradthurston/OneBoard.git
 cd OneBoard
 ```
 

@@ -1,6 +1,6 @@
 # OneBoard
 
-![CI](https://github.com/bradthurston-creator/OneBoard/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/bradthurston/OneBoard/actions/workflows/ci.yml/badge.svg)
 
 A **self-installing, multi-client hardware canvas** built on the ESP32 CYD
 (Cheap Yellow Display, 240×320). One board, many tools: it becomes whatever
@@ -14,6 +14,19 @@ self-description: a web page, a Telegram bot, or an LLM.
 > a bare machine to a live, controllable board (~20 min). **On Linux, run
 > `./install.sh`** for a one-shot install of every dependency (PlatformIO,
 > Python venv, serial permissions, optional store/Telegram services).
+
+---
+
+## Demo
+
+![OneBoard cycling through tools on a single board, no reflash](docs/media/oneboard-demo.gif)
+
+One board, eight tools, no reflash. The panel is rendering from the board's own
+self-description — the same `/schema` + `/state` + behavior JSON any client reads.
+
+Filming it yourself: [`docs/DEMO-SHOTLIST.md`](docs/DEMO-SHOTLIST.md) has the shot
+list, plus `tools/demo_drive.py` (cues you through the take and confirms every tap
+landed) and `tools/render_frames.py` (turns the same recorded sequence into the GIF).
 
 ---
 
