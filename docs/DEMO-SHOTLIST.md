@@ -95,6 +95,16 @@ metrics are host approximations of TFT_eSPI's GLCD fonts, so glyphs can sit a
 pixel or two off the panel. Say so if anyone asks; don't imply it's a capture of
 the LCD.
 
+**One known gap: the graph trace.** `R_GRAPH` draws its line from a
+`VM_GRAPH_SIZE` ring buffer held inside the VM, and nothing exposes that history
+over HTTP — `/state` reports slot *values*, not the sample buffer. So the GIF's
+`temp-logger` frame shows the graph frame with an empty plot, while the panel
+would show a trace. The graph frame and the live reading are real; the trace is
+missing. This is the same gap that makes `tools/board_view.html` label its graph
+handler `/* approximated */` — i.e. "any client can render the board" is not yet
+literally true for graph tools. Closing it means a small `/graph` endpoint in the
+firmware; not done yet.
+
 ## Driving the board without a finger
 
 `/load` now takes an optional `home` argument, so a script can put a tool on the

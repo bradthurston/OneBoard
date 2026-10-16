@@ -327,7 +327,20 @@ def frames_from_tour(board: str) -> list:
         doc = get_json(st["store_url"].rstrip("/") + f"/{t}.json")
         slots = {s["name"]: s["value"] for s in state.get("slots", [])}
         frames.append((t, render_tool_screen(doc, slots)))
-        frames.append(("home", render_home_screen(tools, t)))
+
+        # Put the board BACK on the launcher before rendering a launcher frame,
+        # so every frame in the sequence is a real board state - not a screen we
+        # drew while the panel was showing something else.
+        try:
+            get_json(f"http://{board}/load?id={t}&home=1")
+            hstatus = get_json(f"http://{board}/status") or {}
+            if hstatus.get("home"):
+                frames.append(("home", render_home_screen(tools, t)))
+            else:
+                print(f"  ! {t}: home=1 did not open the launcher; "
+                      "skipping the home frame", file=sys.stderr)
+        except Exception as e:  # noqa: BLE001
+            print(f"  ! home for {t} failed: {e}", file=sys.stderr)
 
     return frames
 
