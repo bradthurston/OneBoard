@@ -771,6 +771,15 @@ void handleRoot() {
       "button:hover{border-color:#4af;background:#333}"
       ".active{background:#4af;color:#000;border-color:#4af}"
       ".footer{margin-top:18px;font-size:0.8em;color:#666}"
+      ".netlist{max-width:280px;margin:0 auto;text-align:left}"
+      ".net{display:flex;align-items:center;justify-content:space-between;gap:8px;"
+        "padding:10px 12px;margin:6px 0;border:1px solid #444;border-radius:8px;"
+        "background:#1c1c1c;cursor:pointer;font-size:0.95em}"
+      ".net:hover{border-color:#4af;background:#262626}"
+      ".net.picked{border-color:#4af;background:#12324a}"
+      ".net .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+      ".net .rssi{flex:0 0 auto;font-size:0.75em;color:#8ab}"
+      ".hint{font-size:0.75em;color:#777;max-width:280px;margin:0 auto 6px}"
     "</style></head><body>"
     "<h1>&#9670; OneBoard</h1>"
     "<div class='store-url' id='storeLabel'></div>"
@@ -784,6 +793,9 @@ void handleRoot() {
     "</div>"
     "<div style='margin-top:18px;border-top:1px solid #444;padding-top:12px'>"
       "<div style='font-size:0.9em;color:#9cf;margin-bottom:6px'>WiFi (join your home network)</div>"
+      "<div class='hint'>Tap a network below to fill the name. Only 2.4 GHz networks appear - that is the band the board can join. Hidden networks never show, so the text field stays for those.</div>"
+      "<button onclick='scanWifi()' id='scanBtn' style='background:#333;border-color:#9cf'>Scan for networks</button>"
+      "<div id='netList' class='netlist'></div>"
       "<input id='wifiSsid' type='text' style='width:100%;max-width:280px;padding:8px;background:#222;color:#fff;border:1px solid #555'"
         " placeholder='Home WiFi SSID' />"
       "<input id='wifiPass' type='password' style='width:100%;max-width:280px;padding:8px;background:#222;color:#fff;border:1px solid #555'"
@@ -830,6 +842,44 @@ void handleRoot() {
           "if(j.ok)document.getElementById('storeLabel').innerText='Store: '+j.url"
         "}catch(e){alert('Failed')}"
       "}"
+      "var scanTimer=null;"
+      "function pickNet(ssid,el){"
+        "document.getElementById('wifiSsid').value=ssid;"
+        "var all=document.querySelectorAll('.net');"
+        "for(var i=0;i<all.length;i++)all[i].className='net';"
+        "if(el)el.className='net picked';"
+      "}"
+      "function renderNets(list){"
+        "var el=document.getElementById('netList');"
+        "el.innerHTML='';"  // clearing only - every network name goes in via innerText
+        "if(!list.length){el.innerText='No networks found - tap Scan again.';return}"
+        "list.forEach(function(n){"
+          "var d=document.createElement('div');d.className='net';"
+          "var a=document.createElement('span');a.className='nm';"
+          "a.innerText=n.ssid+(n.secure?'':' (open)');"
+          "var b=document.createElement('span');b.className='rssi';b.innerText=n.rssi+' dBm';"
+          "d.appendChild(a);d.appendChild(b);"
+          "d.onclick=function(){pickNet(n.ssid,d)};"
+          "el.appendChild(d)"
+        "})"
+      "}"
+      "function pollScan(){"
+        "fetch('/scan').then(function(r){return r.json()}).then(function(j){"
+          "if(j.state==='running'){scanTimer=setTimeout(pollScan,700);return}"
+          "scanTimer=null;"
+          "document.getElementById('scanBtn').innerText='Scan for networks';"
+          "renderNets(j.networks||[])"
+        "}).catch(function(){scanTimer=null;"
+          "document.getElementById('scanBtn').innerText='Scan for networks'})"
+      "}"
+      "function scanWifi(){"
+        "if(scanTimer)return;"
+        "var st=document.getElementById('wifiStatus');"
+        "st.innerText='Scanning - the access point may stutter for a second.';"
+        "document.getElementById('scanBtn').innerText='Scanning...';"
+        "fetch('/scan?start=1').then(function(){scanTimer=setTimeout(pollScan,800)})"
+          ".catch(function(){scanTimer=null;st.innerText='Scan failed'})"
+      "}"
       "async function setWifi(){"
         "var s=document.getElementById('wifiSsid').value.trim();"
         "var p=document.getElementById('wifiPass').value;"
@@ -847,12 +897,15 @@ void handleRoot() {
         "document.getElementById('current').innerText='Tool: '+j.tool;"
         "document.getElementById('storeLabel').innerText='Store: '+j.store_url + (j.wifi?' | WiFi IP: '+j.ip:'');"
         "document.getElementById('storeInput').value=j.store_url;"
-        "if(j.provisioning)document.getElementById('provBanner').style.display='block';"
+        "if(j.provisioning){document.getElementById('provBanner').style.display='block';scanWifi()}"
         "renderTools(j.store_url);"
         "var b=document.getElementById('btn-'+j.tool);"
         "if(b)b.className='active'"
       "}).catch(()=>{})"
     "</script></body></html>");
+  // Never let a browser serve a stale copy of the setup page: a cached page
+  // shows a form whose state (provisioning? store URL? tool list?) is wrong.
+  server.sendHeader("Cache-Control", "no-store, must-revalidate");
   server.send(200, "text/html", html);
 }
 
@@ -931,6 +984,96 @@ void handleTouchMap() {
   json += "],\"raw\":[";
   json += lastRawX; json += ","; json += lastRawY;
   json += "]}";
+  server.send(200, "application/json", json);
+}
+
+/* ==========================================================
+   WiFi scan — provisioning helper.
+
+   Lets the setup page offer the real networks instead of making you type an
+   SSID. Three things shape how this works:
+
+   * It is ASYNC on purpose. The ESP32 has one radio; a scan hops all 13
+     channels, so while it runs the soft AP is off its channel and a connected
+     phone can stutter or briefly drop. A blocking scan would hold that for 2-4s
+     inside the HTTP request, so instead we start the scan, answer immediately,
+     and the page polls /scan until it reports done.
+   * Only 2.4 GHz networks appear. The ESP32 has no 5 GHz radio and could not
+     join a 5 GHz network anyway, so the list is honest by construction.
+   * Hidden networks carry no SSID at all, so they are skipped - there is
+     nothing to display. That is why the form keeps its free-text field.
+   ========================================================== */
+#define SCAN_MAX_SHOWN 12
+
+void handleScan() {
+  if (server.hasArg("start")) {
+    // async=true: enables the STA interface itself and returns immediately.
+    WiFi.scanNetworks(true, false);
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", "{\"state\":\"running\"}");
+    return;
+  }
+
+  int n = WiFi.scanComplete();
+  if (n == WIFI_SCAN_RUNNING) {
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", "{\"state\":\"running\"}");
+    return;
+  }
+  if (n < 0) {            // failed, or no scan has been started yet
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", "{\"state\":\"idle\",\"networks\":[]}");
+    return;
+  }
+
+  String  names[SCAN_MAX_SHOWN];
+  int32_t sig[SCAN_MAX_SHOWN];
+  bool    secure[SCAN_MAX_SHOWN];
+  int     found = 0;
+
+  for (int i = 0; i < n; i++) {
+    String s = WiFi.SSID(i);
+    if (s.length() == 0) continue;                 // hidden: nothing to pick
+    int32_t r = WiFi.RSSI(i);
+    bool sec = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
+
+    // One SSID often has several APs behind it (mesh, or the same name on both
+    // bands), so dedupe by name and keep the strongest signal.
+    int at = -1;
+    for (int j = 0; j < found; j++) if (names[j] == s) { at = j; break; }
+    if (at < 0) {
+      if (found >= SCAN_MAX_SHOWN) continue;       // list full; don't grow
+      at = found++;
+      names[at] = s; sig[at] = r; secure[at] = sec;
+    } else if (r > sig[at]) {
+      sig[at] = r; secure[at] = sec;
+    }
+  }
+
+  // Strongest first — the order that helps pick the AP you're actually near.
+  for (int i = 1; i < found; i++) {
+    String  kn = names[i]; int32_t kr = sig[i]; bool ks = secure[i];
+    int j = i - 1;
+    while (j >= 0 && sig[j] < kr) {
+      names[j + 1] = names[j]; sig[j + 1] = sig[j]; secure[j + 1] = secure[j];
+      j--;
+    }
+    names[j + 1] = kn; sig[j + 1] = kr; secure[j + 1] = ks;
+  }
+
+  String json = "{\"state\":\"done\",\"networks\":[";
+  for (int i = 0; i < found; i++) {
+    if (i) json += ",";
+    String esc = names[i];
+    esc.replace("\\", "\\\\");                     // SSIDs are arbitrary bytes
+    esc.replace("\"", "\\\"");
+    json += "{\"ssid\":\"" + esc + "\",\"rssi\":" + String(sig[i]) +
+            ",\"secure\":" + (secure[i] ? "true" : "false") + "}";
+  }
+  json += "]}";
+
+  WiFi.scanDelete();                               // free the result set
+  server.sendHeader("Cache-Control", "no-store");
   server.send(200, "application/json", json);
 }
 
@@ -1112,6 +1255,8 @@ void handleNotFound() {
     // 302 to the config page — the phone's captive browser follows it and
     // shows our setup form automatically.
     server.sendHeader("Location", "http://192.168.4.1/", true);
+    // no-store so the phone re-asks us instead of replaying a cached redirect
+    server.sendHeader("Cache-Control", "no-store, must-revalidate");
     server.send(302, "text/plain", "redirect");
     return;
   }
@@ -1179,6 +1324,7 @@ void setup() {
   server.on("/delete",  handleDelete);
   server.on("/touch",   handleTouchDebug);
   server.on("/touchmap", handleTouchMap);
+  server.on("/scan",    handleScan);
   server.on("/wifi",    handleWifi);
   server.onNotFound(handleNotFound);
   server.begin();

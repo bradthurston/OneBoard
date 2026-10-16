@@ -119,9 +119,16 @@ You should see `OneBoard Stage 3 ready` and the board's AP appear.
    creates its own WiFi access point.
 2. On your phone: **Settings → WiFi → join `OneBoard-Stage3`** (no password).
 3. The captive-portal page **auto-opens** (if not, browse to `http://192.168.4.1`).
-4. Enter your home WiFi **SSID + password** and tap **Join Home WiFi**.
+4. Your home network is already listed — the board scans and shows the nearby
+   2.4 GHz networks with signal strength, strongest first. **Tap yours** to fill
+   the name, then type the password and tap **Join Home WiFi**. (Hidden networks
+   can't be listed, so the text field is still there if you need it.)
 5. The board joins your network and shows its new IP on screen (also visible
    at `/status`).
+
+> **2.4 GHz only.** The ESP32 has no 5 GHz radio, so only 2.4 GHz networks appear
+> in the list — and those are the only ones the board can join anyway. If your
+> router publishes one name for both bands, you'll see it once.
 
 From now on the board remembers the WiFi in NVS — it auto-joins on every boot.
 

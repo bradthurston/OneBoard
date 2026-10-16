@@ -164,6 +164,7 @@ Full authoring reference: [`docs/BEHAVIOR-AUTHORING.md`](docs/BEHAVIOR-AUTHORING
 | `/delete?id=<tool>` | Purge a tool's cached copy from the board's LittleFS (the store's DELETE is authoritative) |
 | `/store?url=...` | Point the board at a behavior store |
 | `/wifi?ssid=&pass=` | Join home WiFi (persisted in NVS; never in the repo) |
+| `/scan` | Nearby 2.4 GHz networks as JSON — powers the setup page's pick-a-network list. `/scan?start=1` begins an async scan; poll `/scan` until `state` is `done` |
 
 The store (`store/serve.py`) additionally accepts `DELETE /delete?id=<tool>` to
 remove a behavior for good — that's what drops it from `/tools` and the web
