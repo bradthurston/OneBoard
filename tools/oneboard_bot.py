@@ -110,6 +110,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/tools — list available behaviors\n"
         "/load <id> — load a behavior onto the board\n"
         "/make <request> — author a NEW behavior and push it to the board (LLM)\n"
+        "/delete <id> — remove a tool from the store\n"
         "/schema — VM vocabulary (self-description)\n"
         "/help — this"
     )
@@ -224,6 +225,60 @@ async def cmd_make(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await confirm.edit_text(reply[:4000])
 
 
+
+async def cmd_delete(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not authorized(update):
+        return
+    if not ctx.args:
+        await update.message.reply_text(
+            "Usage: /delete <tool-id>\n"
+            "Removes the tool from the store (and the board's cached copy). "
+            "It disappears from /tools and the web page."
+        )
+        return
+    tool = ctx.args[0].strip()
+    # Reject path-traversal / padding ids before they reach the store/board.
+    import re as _re
+    if not _re.match(r"^[a-z0-9][a-z0-9-]{0,63}$", tool):
+        await update.message.reply_text(f"Invalid tool id: '{tool}' (use kebab-case, letters/digits/dashes only).")
+        return
+
+    # 1) Delete from the store (authoritative — removes from /tools + web page)
+    store_err = None
+    store_result = None
+    try:
+        req = urllib.request.Request(
+            STORE + "/delete?id=" + urllib.parse.quote(tool), method="DELETE")
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            store_result = json.loads(resp.read().decode())
+    except Exception as e:
+        store_err = str(e)
+
+    # 2) Purge the board's LittleFS cache copy so /load can't resurrect it
+    board_err = None
+    cached = None
+    try:
+        r = json.loads(http_post(f"http://{BOARD}/delete", {"id": tool}))
+        cached = r.get("cached")
+    except Exception as e:
+        board_err = str(e)
+
+    if store_err and store_result is None:
+        await update.message.reply_text(f"Store delete failed: {store_err}")
+        return
+    # store_result may be {"ok":false,"error":...} for builtins/404 — surface it
+    if store_result and not store_result.get("ok"):
+        await update.message.reply_text(f"Cannot delete: {store_result.get('error','unknown reason')}")
+        return
+    line = f"Deleted \"{tool}\" from the store."
+    if store_result is not None and store_result.get("deleted"):
+        line = f"Deleted \"{store_result.get('deleted')}\" from the store."
+    if cached:
+        line += "\n(Also purged the board's cached copy.)"
+    elif board_err:
+        line += f"\nNote: could not purge board cache: {board_err}"
+    await update.message.reply_text(line)
+
 def main():
     if not TOKEN:
         print("ONBOARD_BOT_TOKEN not set — cannot start", file=sys.stderr)
@@ -243,6 +298,7 @@ def main():
     app.add_handler(CommandHandler("load", cmd_load))
     app.add_handler(CommandHandler("schema", cmd_schema))
     app.add_handler(CommandHandler("make", cmd_make))
+    app.add_handler(CommandHandler("delete", cmd_delete))
     print("OneBoard bot polling (board=%s)" % BOARD)
     app.run_polling()
 

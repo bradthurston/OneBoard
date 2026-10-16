@@ -11,11 +11,21 @@ Usage:
 import http.server
 import json
 import os
+import re
 import sys
 import argparse
+import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BEHAVIORS_DIR = os.path.normpath(os.path.join(HERE, "..", "behaviors"))
+
+# Built into the firmware (src/main.cpp TEMP/TIMER/etc. PROGMEM); deleting their
+# store file is meaningless because /load falls back to the firmware copy.
+BUILTIN_TOOLS = {"timer", "temp-logger", "reaction-game", "tap-counter"}
+
+# Behavior ids must be kebab-case, no path separators — hard guard against
+# deleting arbitrary files via a crafted id (e.g. "../secret.json").
+ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 
 class BehaviorHandler(http.server.SimpleHTTPRequestHandler):
@@ -26,9 +36,40 @@ class BehaviorHandler(http.server.SimpleHTTPRequestHandler):
 
     def end_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS, DELETE")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         super().end_headers()
+
+    def _json(self, code, payload):
+        body = json.dumps(payload).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_DELETE(self):
+        # DELETE /delete?id=<tool>  (or DELETE /<tool>.json) — remove a behavior.
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        tool = qs.get("id", [None])[0]
+        if not tool:
+            m = re.match(r"^/([a-z0-9][a-z0-9-]{0,63})\.json$", parsed.path)
+            tool = m.group(1) if m else None
+        if not tool:
+            self._json(400, {"ok": False, "error": "missing id"})
+            return
+        if not ID_RE.match(tool):
+            self._json(400, {"ok": False, "error": f"invalid id: {tool}"})
+            return
+        if tool in BUILTIN_TOOLS:
+            self._json(409, {"ok": False, "error": f"'{tool}' is a firmware built-in, cannot delete"})
+            return
+        path = os.path.join(BEHAVIORS_DIR, tool + ".json")
+        if not os.path.isfile(path):
+            self._json(404, {"ok": False, "error": f"no such tool: {tool}"})
+            return
+        os.remove(path)
+        self._json(200, {"ok": True, "deleted": tool})
 
     def do_OPTIONS(self):
         self.send_response(204)

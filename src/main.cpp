@@ -580,6 +580,32 @@ void handleSchema() {
   server.send(200, "application/json", schema);
 }
 
+void handleDelete() {
+  if (!server.hasArg("id")) {
+    server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing id\"}");
+    return;
+  }
+  String id = server.arg("id");
+  // Only purge the board's LittleFS CACHE copy. The authoritative removal is
+  // the store (store/serve.py DELETE); this endpoint just makes sure /load
+  // can't resurrect a deleted tool from the board's local cache.
+  String path = String(BEHAVIOR_DIR) + id + ".json";
+  bool had = LittleFS.exists(path.c_str());
+  if (had) LittleFS.remove(path.c_str());
+  // If the deleted tool is what's currently on screen, fall back to the default
+  // built-in so the panel isn't stuck showing a tool that no longer exists in
+  // the store.
+  if (activeToolId == id) {
+    activeToolId = DEFAULT_TOOL;
+    saveConfigStr(ACTIVE_KEY, DEFAULT_TOOL);
+    loadBehavior(DEFAULT_TOOL);
+  }
+  String json = "{\"ok\":true,\"cached\":";
+  json += had ? "true" : "false";
+  json += ",\"id\":\"" + id + "\"}";
+  server.send(200, "application/json", json);
+}
+
 void handleStore() {
   if (server.hasArg("url")) {
     storeUrl = server.arg("url");
@@ -675,6 +701,7 @@ void setup() {
   server.on("/state",   handleState);
   server.on("/schema",  handleSchema);
   server.on("/store",   handleStore);
+  server.on("/delete",  handleDelete);
   server.on("/wifi",    handleWifi);
   server.onNotFound(handleNotFound);
   server.begin();

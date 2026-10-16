@@ -124,8 +124,9 @@ A behavior is JSON with **typed state slots** and **event handlers**:
 - **First-match-guard-wins**: on an event, run the first handler whose guard
   matches, then stop. Order matters.
 - **Verbs** are straight-line lists (no loops, no recursion): `add`, `sub`,
-  `set`/`setf`, `toggle`, `stamp`, `random`, `now_minus`, `format`,
-  `progress`, `render`, `if` (bounded forward branch).
+  `mul`, `div`, `mod`, `clamp`, `set`/`setf`, `toggle`, `stamp`, `random`,
+  `now_minus`, `format`, `progress`, `render`, `if` (bounded forward branch).
+  `div`/`mod` guard divide-by-zero (→ 0); `clamp` takes `{slot, min, max}`.
 - **Render primitives**: `clear`, `text`, `rect`, `fillrect`, `line`,
   `circle`, `bar`, `graph`. Colors from a fixed palette.
 - **Guards**: `eq ne lt le gt ge`, `is_true`, `elapsed_ge`, `always`.
@@ -144,8 +145,14 @@ Full authoring reference: [`docs/BEHAVIOR-AUTHORING.md`](docs/BEHAVIOR-AUTHORING
 | `/state` | Live VM slots (`name, type, value`) + render primitives |
 | `/schema` | The VM vocabulary — what an LLM needs to author a behavior |
 | `/load?id=<tool>` | Compile + run a behavior from the store |
+| `/delete?id=<tool>` | Purge a tool's cached copy from the board's LittleFS (the store's DELETE is authoritative) |
 | `/store?url=...` | Point the board at a behavior store |
 | `/wifi?ssid=&pass=` | Join home WiFi (persisted in NVS; never in the repo) |
+
+The store (`store/serve.py`) additionally accepts `DELETE /delete?id=<tool>` to
+remove a behavior for good — that's what drops it from `/tools` and the web
+page. Firmware built-ins (`timer`, `temp-logger`, `reaction-game`,
+`tap-counter`) are protected from deletion.
 
 Captive-portal probes (`/generate_204`, `/hotspot-detect.html`, Apple/Google/
 Microsoft hosts) are intercepted with a 302 to the setup page when the board is
@@ -183,6 +190,8 @@ Message `@OneBoardControl_bot`:
 `/make <request>` — author a NEW behavior and push it to the board (delegates
   to `tools/author.py`, the LLM stage-4 pipeline; takes ~30-90s — it validates,
   self-corrects, and pushes over the wire, no reflash)
+`/delete <id>` — remove a tool from the store (and the board's cached copy)
+  so it disappears from `/tools` and the web page
 `/schema` — the VM vocabulary
 `/help`
 
@@ -205,7 +214,10 @@ python3 store/serve.py --port 8082
 
 `timer` · `temp-logger` · `reaction-game` · `tap-counter` · `stopwatch` · `dice`
 
-All six are also embedded in firmware as PROGMEM fallbacks (offline boot).
+`timer`, `temp-logger`, `reaction-game` and `tap-counter` are also embedded in
+firmware as PROGMEM fallbacks (offline boot) — those four are protected from
+store deletion. Tools created by `/make` (or added to `behaviors/`) are
+store-only and can be deleted freely.
 
 ---
 
