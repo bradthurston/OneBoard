@@ -260,6 +260,7 @@ with live state and a "simulate tap" button.
 | `ModuleNotFoundError: No module named 'telegram'` | Run the bot with `.venv/bin/python`, not system python (step 9.3). |
 | Author tool returns empty / stalls | DeepSeek on OpenRouter can burn its budget on invisible reasoning — the tool already sends `reasoning:{enabled:false}`; make sure your key has credit. |
 | Captive portal page doesn't auto-open | Browse manually to `http://192.168.4.1` after joining the AP. |
+| **Store tool list is empty / "store isn't loading"** | The board ships pointing at `http://192.168.4.100:8080`, an address that only exists while it is in AP mode — so a freshly provisioned board can never reach a store. Point it at wherever `store/serve.py` is actually running: `curl -G "http://<board-ip>/store" --data-urlencode "url=http://<your-pc-ip>:8082"`. It persists in NVS, but an erase wipes it, so a from-scratch board needs it again. Note the store must be on the **same LAN** as the board, the port must match (`--port 8082` here because 8080 was taken), and if your PC's IP is DHCP it can move and break the link again — reserve it. |
 
 ---
 
