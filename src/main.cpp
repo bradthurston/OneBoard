@@ -145,6 +145,33 @@ bool          vmInitialized = false;
 String        lastLoadError = "";   // human-readable reason for the last failed load
 
 /* ==========================================================
+   Home screen — firmware-level "exit out of a tool" affordance.
+   A small persistent home button is drawn top-left on EVERY screen
+   (even over a running tool) and its touch is intercepted BEFORE
+   it reaches the running behavior, so a full-screen tool can never
+   hijack it. Tapping it opens a live list of tools from the store;
+   tap a tool to load + run it. Not a behavior (behaviors are static
+   JSON and can't enumerate the tool list — firmware already queries
+   the store for the web page, so it lists tools the same way).
+   ========================================================== */
+bool          homeMode = false;      // true = showing the home/tool menu
+#define HOME_BTN_X 0                 // top-left corner: reserved for home
+#define HOME_BTN_Y 0
+#define HOME_BTN_W 28
+#define HOME_BTN_H 28
+#define HOME_LIST_MAX 24             // tools we can list (store + builtins)
+#define HOME_ROW_H 30                // vertical pitch of each tool row
+#define HOME_LIST_Y 44               // first row's y (below title)
+String        homeList[HOME_LIST_MAX];
+int           homeCount = 0;
+int           homeScroll = 0;        // rows scrolled off the top (0 = first)
+#define HOME_ROWS_VISIBLE ((320 - HOME_LIST_Y) / HOME_ROW_H)
+
+// Forward decl — loadBehaviorFromJson (defined later) calls this to keep the
+// home button on top of every freshly-rendered tool screen.
+void drawHomeButton();
+
+/* ==========================================================
    NVS config helpers
    ========================================================== */
 String loadConfigStr(const char* key, const char* fallback) {
@@ -215,6 +242,7 @@ bool loadBehaviorFromJson(const char* jsonStr) {
   // a tick at all). Mark the first matching handler's renders dirty and flush.
   vmMarkInitialRender(&g_state, &g_prog);
   vmRender(&g_state, &g_prog, &tft);
+  drawHomeButton();
 
   const char* id = root["id"];
   if (id) { activeToolId = String(id); saveConfigStr(ACTIVE_KEY, id); }
@@ -335,6 +363,132 @@ bool wifiStationConnect(bool verbose = true) {
 
 void tryStationConnect() {
   wifiStationConnect(true);
+}
+
+/* ==========================================================
+   Home screen — firmware-level launcher (see globals above).
+   Lists tools from the store (fallback: builtins + LittleFS
+   cache), lets the user pick one, and is entered by tapping
+   the persistent top-left home button on ANY screen.
+   ========================================================== */
+static String stripJsonExt(const String& f) {
+  if (f.endsWith(".json")) return f.substring(0, f.length() - 5);
+  return f;
+}
+
+// Fetch the store's tool list into homeList[]. Returns count (0 = none/unreachable).
+static int loadStoreToolList() {
+  int n = 0;
+  if (wifiStationOk) {
+    HTTPClient http;
+    String url = storeUrl;
+    if (!url.endsWith("/")) url += "/";
+    http.begin(url.c_str()); http.setTimeout(5000);
+    int code = http.GET();
+    if (code == 200) {
+      String payload = http.getString();
+      http.end();
+      JsonDocument doc;
+      if (!deserializeJson(doc, payload)) {
+        JsonArray arr = doc["behaviors"].as<JsonArray>();
+        for (JsonVariant v : arr) {
+          if (n >= HOME_LIST_MAX) break;
+          String id = stripJsonExt(v.as<String>());
+          if (id.length()) homeList[n++] = id;
+        }
+      }
+    } else {
+      http.end();
+    }
+  }
+  // Always ensure the firmware built-ins are present (they always work even if
+  // the store dropped them or is unreachable).
+  const char* builtins[4] = {"timer", "temp-logger", "reaction-game", "tap-counter"};
+  for (int i = 0; i < 4; i++) {
+    bool present = false;
+    for (int j = 0; j < n; j++) if (homeList[j] == builtins[i]) { present = true; break; }
+    if (!present && n < HOME_LIST_MAX) homeList[n++] = builtins[i];
+  }
+  // Also add any behavior cached in LittleFS that isn't in the store list.
+  File dir = LittleFS.open("/behaviors/");
+  if (dir && dir.isDirectory()) {
+    File f = dir.openNextFile();
+    while (f && n < HOME_LIST_MAX) {
+      String fn = f.name();
+      // openNextFile returns full path in some versions; take basename
+      int slash = fn.lastIndexOf('/');
+      if (slash >= 0) fn = fn.substring(slash + 1);
+      String id = stripJsonExt(fn);
+      if (id.length()) {
+        bool present = false;
+        for (int j = 0; j < n; j++) if (homeList[j] == id) { present = true; break; }
+        if (!present) homeList[n++] = id;
+      }
+      f.close();
+      f = dir.openNextFile();
+    }
+    dir.close();
+  }
+  return n;
+}
+
+// Draw the small persistent home button glyph in the top-left corner.
+void drawHomeButton() {
+  tft.fillRect(HOME_BTN_X, HOME_BTN_Y, HOME_BTN_W, HOME_BTN_H, TFT_DARKGREY);
+  tft.drawRect(HOME_BTN_X, HOME_BTN_Y, HOME_BTN_W, HOME_BTN_H, TFT_YELLOW);
+  // roof (triangle) + body (rect) = a house
+  tft.fillTriangle(HOME_BTN_X + 3,  HOME_BTN_Y + 12,
+                   HOME_BTN_X + 14, HOME_BTN_Y + 3,
+                   HOME_BTN_X + 25, HOME_BTN_Y + 12, TFT_YELLOW);
+  tft.fillRect(HOME_BTN_X + 5, HOME_BTN_Y + 12, 18, 12, TFT_YELLOW);
+}
+
+// Show the home screen (title + list of tools). Scrolls when > rows fit.
+static void drawHomeScreen() {
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+  tft.drawString("OneBoard — pick a tool", 6, 6, 2);
+  tft.drawFastHLine(0, 26, 240, TFT_DARKGREY);
+
+  int visible = HOME_ROWS_VISIBLE;
+  for (int i = 0; i < visible; i++) {
+    int idx = homeScroll + i;
+    if (idx >= homeCount) break;
+    int y = HOME_LIST_Y + i * HOME_ROW_H;
+    bool cur = (homeList[idx] == activeToolId);
+    if (cur) tft.fillRect(4, y - 4, 232, HOME_ROW_H - 4, TFT_NAVY);
+    tft.setTextColor(cur ? TFT_CYAN : TFT_WHITE, cur ? TFT_NAVY : TFT_BLACK);
+    tft.drawString(homeList[idx], 12, y, 2);
+  }
+
+  // Scroll affordance chevrons (up / down) at bottom when there's more.
+  if (homeScroll > 0) {
+    tft.fillTriangle(20, 300, 30, 290, 40, 300, TFT_DARKGREY);  // up
+  }
+  if (homeScroll + HOME_ROWS_VISIBLE < homeCount) {
+    tft.fillTriangle(200, 290, 210, 300, 220, 290, TFT_DARKGREY);  // down
+  }
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("tap a tool  |  <| home", 6, 310, 1);  // font 1 small hint
+}
+
+// Handle a tap while the home screen is showing. Returns true if it navigated.
+static void homeHandleTouch(int16_t tx, int16_t ty) {
+  // Up / down scroll chevrons
+  if (ty >= 286 && ty <= 302) {
+    if (tx < 60 && homeScroll > 0) { homeScroll--; drawHomeScreen(); return; }
+    if (tx > 180 && homeScroll + HOME_ROWS_VISIBLE < homeCount) { homeScroll++; drawHomeScreen(); return; }
+    return;
+  }
+  int rel = ty - HOME_LIST_Y;
+  if (rel < 0) return;
+  int row = rel / HOME_ROW_H;
+  int idx = homeScroll + row;
+  if (row >= HOME_ROWS_VISIBLE || idx >= homeCount || idx < 0) return;
+  // Load + run the picked tool.
+  Serial.printf("Home: loading %s\n", homeList[idx].c_str());
+  homeMode = false;
+  loadBehavior(homeList[idx].c_str());
 }
 
 /* ==========================================================
@@ -493,7 +647,9 @@ void handleStatus() {
   json += provisioningMode ? "true" : "false";
   json += ",\"ip\":\"";
   json += wifiStationOk ? WiFi.localIP().toString() : "";
-  json += "\"}";
+  json += "\",\"home\":";
+  json += homeMode ? "true" : "false";
+  json += "}";
   server.send(200, "application/json", json);
 }
 
@@ -723,17 +879,19 @@ void loop() {
   dnsServer.processNextRequest();
   unsigned long now = millis();
 
-  if (vmInitialized) {
+  // Home mode: the tool is paused (not ticking); the screen shows the launcher.
+  if (vmInitialized && !homeMode) {
     // Run scheduled events (ticks); redraw only when something actually ran
     // (Stage 2 behavior — a tick or touch re-renders; no idle redraw storm).
     bool ran = vmTick(&g_state, &g_prog, now);
-    if (ran) vmRender(&g_state, &g_prog, &tft);
+    if (ran) { vmRender(&g_state, &g_prog, &tft); drawHomeButton(); }
   }
 
   /* Touch → touch events (edge-detected, 250ms cooldown).
-     vmDispatchTouch iterates all touch-type events and fires the first whose
-     region (if any) contains the press — so multi-region button screens work.
-     Behaviors with no region get full-screen touch (every press fires). */
+     The top-left home region is intercepted FIRST — before the running tool sees
+     it — so a full-screen tool can never hijack the home button. Tapping it
+     opens the home screen (tool list). Then vmDispatchTouch feeds remaining
+     presses to the active tool, or the home screen handles row selection. */
   static bool touchWasDown = false;
   static uint32_t lastTouchEventMs = 0;
   uint16_t tx = 0, ty = 0;
@@ -741,9 +899,25 @@ void loop() {
   uint32_t tNow = millis();
   if (touched && !touchWasDown && (tNow - lastTouchEventMs > 250)) {
     lastTouchEventMs = tNow;
-    if (vmInitialized) {
-      if (vmDispatchTouch(&g_state, &g_prog, (int16_t)tx, (int16_t)ty))
+
+    bool inHomeBtn = (tx >= HOME_BTN_X && tx < HOME_BTN_X + HOME_BTN_W &&
+                      ty >= HOME_BTN_Y && ty < HOME_BTN_Y + HOME_BTN_H);
+
+    if (homeMode) {
+      // We're already on the home screen — route the tap to it (row select /
+      // scroll). Tapping the home-button area again is harmless here.
+      homeHandleTouch((int16_t)tx, (int16_t)ty);
+    } else if (inHomeBtn) {
+      // User tapped the persistent home button → open the tool launcher.
+      homeScroll = 0;
+      homeCount = loadStoreToolList();
+      homeMode = true;
+      drawHomeScreen();
+    } else if (vmInitialized) {
+      if (vmDispatchTouch(&g_state, &g_prog, (int16_t)tx, (int16_t)ty)) {
         vmRender(&g_state, &g_prog, &tft);
+        drawHomeButton();   // tool re-rendered — keep home button on top
+      }
     }
   }
   touchWasDown = touched;
