@@ -1,5 +1,6 @@
 #include "vm.h"
 #include <cassert>
+#include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -127,8 +128,66 @@ static void initialBranches() {
     vmMarkInitialRender(&s,&p); assert(s.render_dirty==(value?1u:2u)); assert(vmGetInt(&s,0)==value);
   }
 }
+// Self-erasing text. A value that updates every tick used to need a full-screen
+// 'clear' to erase stale digits — 150 KB over the CYD's 20 MHz SPI, ~61 ms, so a
+// 100 ms tick left the panel black 61% of the time and visibly flickered. Text
+// with "bg" blanks only its own box instead. Assert both halves: the box is
+// painted (and correctly placed), and the screen is NOT cleared.
+static void selfErasingText() {
+  TFT_eSPI tft;
+  auto build = [](bool withBg, bool withWh, bool withClear) {
+    // Build the tool as JSON text: growing an ArduinoJson document's pool
+    // invalidates references to it, so hand-assembling nodes loses writes.
+    std::string r = R"({"render":{"type":"text","x":{"lit":120},"y":{"lit":120},)"
+                    R"("src":{"slot":"display"},"font":{"lit":6},"color":"white","center":true)";
+    if (withBg) {
+      r += R"(,"bg":"black")";
+      if (withWh) r += R"(,"w":{"lit":200},"h":{"lit":56})";
+    }
+    r += "}}";
+    std::string renders = withClear ? R"({"render":{"type":"clear","color":"black"}},)" : "";
+    renders += r;
+    // slot 0 is deliberately 300 — larger than the text box — so if the compiler
+    // ever regresses to resolving an absent w/h from slot 0, the geometry
+    // assertions below fail loudly instead of quietly clamping.
+    std::string json = R"({"id":"t","state":[{"name":"n","type":"int64","init":300},)"
+                       R"({"name":"display","type":"string","init":"00:01"}],)"
+                       R"("events":[{"name":"tick","schedule":{"type":"interval","ms":100},)"
+                       R"("handlers":[{"run":[)" + renders + R"(]}]}]})";
+    JsonDocument d;
+    assert(!deserializeJson(d, json));
+    return d;
+  };
+  auto draw = [&](JsonDocument& d, int expect_screen_clears) {
+    VmProgram p; VmState s;
+    assert(vmCompile(d.as<JsonObject>(), &p));
+    vmStateInit(&s, &p);
+    vmMarkInitialRender(&s, &p);
+    TFT_eSPI::resetCalls();
+    vmRender(&s, &p, &tft);
+    // vmRender itself only clears when the behaviour asks for it; the single
+    // load-time clear for a tool switch is main.cpp's job, not the VM's.
+    assert(TFT_eSPI::fillScreen_calls == expect_screen_clears);
+  };
+  // bg + explicit w/h: one fillRect, box centred on the datum (120,120) -> 20,92
+  { auto d = build(true, true, false); draw(d, 0);
+    assert(TFT_eSPI::fillRect_calls == 1);
+    assert(TFT_eSPI::last_fr_x == 20 && TFT_eSPI::last_fr_y == 92 &&
+           TFT_eSPI::last_fr_w == 200 && TFT_eSPI::last_fr_h == 56); }
+  // bg, no w/h: box measured from the glyphs — "00:01" at font 6 = 5 x 32 x 48
+  { auto d = build(true, false, false); draw(d, 0);
+    assert(TFT_eSPI::fillRect_calls == 1);
+    assert(TFT_eSPI::last_fr_x == 40 && TFT_eSPI::last_fr_y == 96 &&
+           TFT_eSPI::last_fr_w == 160 && TFT_eSPI::last_fr_h == 48); }
+  // no bg: transparent text, nothing erased (over a button, that is the point)
+  { auto d = build(false, false, false); draw(d, 0); assert(TFT_eSPI::fillRect_calls == 0); }
+  // a clear is still a full-screen fill, so the guard has something real to warn about
+  { auto d = build(false, false, true); draw(d, 1); }
+}
+
 int main(int argc,char** argv) {
   limits(); renderLimit(); references(); progress(); mathVerbs(); initialBranches();
+  selfErasingText();
   for(int i=1;i<argc;++i) {
     std::ifstream input(argv[i]); JsonDocument doc; assert(!deserializeJson(doc,input));
     VmProgram p; if(!vmCompile(doc.as<JsonObject>(),&p)) { std::cerr<<argv[i]<<": "<<p.compile_error<<"\n"; return 1; }

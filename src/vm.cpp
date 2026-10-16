@@ -466,6 +466,20 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
       rp->color_idx = 1; // white default
     }
 
+    // Text background ("bg") — when set, the text erases its own box before
+    // drawing. This is what lets a value update every tick without a
+    // full-screen clear. 0xFF = transparent: draw over whatever is behind.
+    rp->bg_idx = 0xFF;
+    rp->bg_slot = 0xFF;
+    if (p["bg"].is<JsonObject>() && p["bg"]["slot"].is<const char*>()) {
+      JsonObject b = p["bg"];
+      int sidx = resolveSlotIndex(rootState, b["slot"]);
+      if (sidx >= 0) { rp->bg_slot = (uint8_t)sidx; }
+      else return compileFail(prog, "render: bg slot '%s' unknown", (const char*)b["slot"]) ? -1 : -1;
+    } else if (p["bg"].is<const char*>()) {
+      rp->bg_idx = resolveColorIndex(p["bg"]);
+    }
+
     // Position/size — can be slot refs or literals
     auto parseCoord = [&](const char* key, int16_t* out_val, uint8_t* out_slot) {
       JsonVariant v = p[key];
@@ -484,6 +498,13 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
         *out_slot = 0xFF;
       }
     };
+    // Coordinates: 0xFF in the slot field means "use the literal". The program is
+    // memset to zero before compiling, so an ABSENT x/y/w/h would otherwise keep
+    // slot 0 and silently draw using slot 0's value — the same silent-wrong-value
+    // family as bare values. It went unnoticed for years because text ignored
+    // w/h; the self-erasing text box reads them, so it cannot stay broken.
+    rp->x_slot = 0xFF; rp->y_slot = 0xFF;
+    rp->w_slot = 0xFF; rp->h_slot = 0xFF;
     parseCoord("x", &rp->x, &rp->x_slot);
     parseCoord("y", &rp->y, &rp->y_slot);
     parseCoord("w", &rp->w, &rp->w_slot);
@@ -1212,6 +1233,36 @@ void vmRender(VmState* state, const VmProgram* prog, TFT_eSPI* tft) {
         uint8_t f = rp->font;
         if (f < 1) f = 2;
         if (f > 7) f = 7;
+        const char* s = text ? text : "";
+        // Self-erasing text. With "bg" set, blank the text's own box first: a
+        // screen clear is 240x320x16bpp = ~61 ms of SPI at 20 MHz, while a text
+        // box is ~6 ms. That 10x is the whole difference between a value that
+        // updates smoothly and a screen that visibly strobes ten times a second.
+        if (rp->bg_idx != 0xFF || rp->bg_slot != 0xFF) {
+          uint16_t bg;
+          if (rp->bg_slot != 0xFF && rp->bg_slot < state->slot_count)
+            bg = resolveColorValue(resolveColorIndex(state->sval[rp->bg_slot]));
+          else
+            bg = resolveColorValue(rp->bg_idx);
+
+          int16_t tw = (int16_t)tft->textWidth(s, f);
+          int16_t th = (int16_t)tft->fontHeight(f);
+          // A value whose width changes (a clock, a counter) must reserve a
+          // fixed box, or the shorter string leaves the tail of the longer one.
+          int16_t bw = (w > 0) ? w : tw;
+          int16_t bh = (h > 0) ? h : th;
+          if (bw < tw) bw = tw;
+          if (bh < th) bh = th;
+          // Same datum the draw below uses, so the box tracks the glyphs.
+          int16_t bx = rp->center ? (int16_t)(x - bw / 2) : x;
+          int16_t by = rp->center ? (int16_t)(y - bh / 2) : y;
+          int16_t sw = (int16_t)tft->width(), sh = (int16_t)tft->height();
+          if (bx < 0) bx = 0;
+          if (by < 0) by = 0;
+          if (bx + bw > sw) bw = sw - bx;
+          if (by + bh > sh) bh = sh - by;
+          if (bw > 0 && bh > 0) tft->fillRect(bx, by, bw, bh, bg);
+        }
         // Single-arg setTextColor = transparent background (textcolor==textbgcolor),
         // so glyphs draw over whatever is behind them. The two-arg form
         // setTextColor(color, TFT_BLACK) painted a black box behind EVERY text,
@@ -1220,10 +1271,10 @@ void vmRender(VmState* state, const VmProgram* prog, TFT_eSPI* tft) {
         if (rp->center) {
           // x is the horizontal centre; MC_DATUM anchors centre of text
           tft->setTextDatum(MC_DATUM);
-          tft->drawString(text ? text : "", x, y, f);
+          tft->drawString(s, x, y, f);
           tft->setTextDatum(TL_DATUM);  // restore default
         } else {
-          tft->drawString(text ? text : "", x, y, f);
+          tft->drawString(s, x, y, f);
         }
         break;
       }

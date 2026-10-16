@@ -34,7 +34,9 @@ COORD_MAX = {"x": 240, "y": 320, "w": 240, "h": 320, "r": 240}
 # Render types → fields they accept (only these are read by vmRender/compile)
 RENDER_FIELDS = {
     "clear": ["color"],
-    "text": ["x", "y", "src", "font", "color", "center"],
+    # text: bg/w/h (all optional) make the draw self-erasing — 'bg' blanks the
+    # text's own box first, w/h reserve a fixed box for a width-changing value.
+    "text": ["x", "y", "src", "font", "color", "center", "bg", "w", "h"],
     "rect": ["x", "y", "w", "h", "color"],
     "fillrect": ["x", "y", "w", "h", "color"],
     "line": ["x", "y", "w", "h", "color"],          # x,y = p1; w,h = p2
@@ -42,6 +44,10 @@ RENDER_FIELDS = {
     "bar": ["x", "y", "w", "h", "color", "src", "max", "px"],
     "graph": ["x", "y", "w", "h", "color", "slot"],
 }
+# A full-screen clear is 240*320*16bpp = 150 KB over the CYD's 20 MHz SPI bus —
+# ~61 ms of black. Nothing can hide it: the ESP32-WROOM-32E has no PSRAM, and a
+# 16-bit full-frame buffer would be 150 KB, i.e. the whole usable heap.
+SCREEN_CLEAR_MS = 61.0
 
 
 class Behavior:
@@ -117,6 +123,51 @@ class Behavior:
         return count
 
     # ---------------------------------------------------------------
+    # Flicker guard. A 'clear' is a full-screen fill — ~61 ms of SPI, measured.
+    # Inside a repeating interval handler it strobes the panel: at a 100 ms tick
+    # the screen is black 61% of the time, which is what a stopwatch showing
+    # centiseconds looks like when it opens with a clear. Values that update
+    # often should erase only what changed: give text a 'bg' (it blanks its own
+    # box, ~10x cheaper) or fillrect the region being redrawn.
+    def _warn_flicker(self, ev_name, sched, handlers):
+        if not isinstance(sched, dict) or sched.get("type") != "interval":
+            return
+        ms = sched.get("ms")
+        if not isinstance(ms, (int, float)) or ms <= 0:
+            return
+        clears = self._count_clears(handlers)
+        if not clears or ms >= 1000:
+            return
+        duty = min(100.0, SCREEN_CLEAR_MS / ms * 100)
+        plural = "s" if clears != 1 else ""
+        self.warn(
+            f"event '{ev_name}' clears the whole screen every {ms:g} ms "
+            f"({clears} clear verb{plural}). A clear is a full-screen fill "
+            f"(~{SCREEN_CLEAR_MS:.0f} ms of SPI), so at this rate the panel is "
+            f"black {duty:.0f}% of the time and visibly flickers. Erase only what "
+            f"changes instead: text takes \"bg\" (blanks its own box) or fillrect "
+            f"the region you redraw."
+        )
+
+    def _count_clears(self, handlers):
+        count = 0
+        def walk(run):
+            nonlocal count
+            for verb in run or []:
+                if not isinstance(verb, dict):
+                    continue
+                r = verb.get("render")
+                if isinstance(r, dict) and r.get("type") == "clear":
+                    count += 1
+                if "if" in verb and isinstance(verb["if"], dict):
+                    walk(verb["if"].get("then"))
+                    walk(verb["if"].get("else"))
+        for h in handlers or []:
+            if isinstance(h, dict):
+                walk(h.get("run"))
+        return count
+
+    # ---------------------------------------------------------------
     def _check_state(self, s):
         if not isinstance(s, dict):
             self.err("state entry must be an object"); return
@@ -163,6 +214,7 @@ class Behavior:
             return
         for h in handlers:
             self._check_handler(name, h)
+        self._warn_flicker(name, sched, handlers)
 
     def _check_handler(self, ev_name, h):
         if not isinstance(h, dict):

@@ -77,7 +77,12 @@ RULES (hard):
 - Every value ref is {"lit":N} / {"lit":"string"} or {"slot":"slotname"} —
   NEVER a bare value. (Bare values compile to 0/empty silently — this is THE
   recurring bug family.)
-- Every screen's render set starts with {"render":{"type":"clear","color":...}}.
+- Each time a NEW SCREEN appears, its first frame starts with
+  {"render":{"type":"clear","color":"black"}}. A clear repaints the WHOLE screen
+  (~61 ms of SPI on this board), so NEVER put one in a repeating interval handler
+  — at a 100 ms tick the panel is black 61% of the time and visibly flickers.
+  To update a value every tick, give the text "bg" (it blanks its own box first,
+  ~10x cheaper) or fillrect just the region you redraw.
 - Text NEVER wraps and clips silently past x=240. Font 2 ~= 11px/char. Keep
   labels short. Center text with "center":true and x=120 (font 2) / x=120
   (font 6) — x then means the horizontal center.
@@ -111,7 +116,10 @@ or {"op":"is_true","a":...} or {"op":"elapsed_ge","a":...,"b":...}.
 
 RENDER TYPES (fields each accepts):
 - clear:      color
-- text:       x y src font color center?    src = {"lit":"..."} or {"slot":string_slot}
+- text:       x y src font color center? bg? w? h?   src = {"lit":"..."} or {"slot":string_slot}
+              bg = erase colour: the text blanks its own box first (use this
+              instead of a per-tick clear). w/h = fixed erase box for values
+              whose width changes (a clock) — set w for the longest string.
 - rect:       x y w h color
 - fillrect:   x y w h color
 - line:       x y w h color   (x,y = p1; w,h = p2)

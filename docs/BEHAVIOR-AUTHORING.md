@@ -98,12 +98,21 @@ Every render is one object; **fields must match the type** (validator enforces).
 Colors: `black white red green blue yellow cyan magenta orange navy darkgrey
 darkgray grey gray`.
 
-- `clear` → `{"type":"clear","color":"black"}` (repaint whole screen; first verb
-  of each screen's render set)
-- `text` → `{"type":"text","x","y","src","font","color","center"?}`
+- `clear` → `{"type":"clear","color":"black"}` (repaint the whole screen: the
+  first verb of each screen's render set, and the right tool when a screen
+  genuinely changes). It is a **full-screen fill — ~61 ms of SPI at 20 MHz**, so
+  it must never sit in a repeating interval handler: at a 100 ms tick the panel
+  is black 61% of the time and visibly flickers. The validator warns on this.
+- `text` → `{"type":"text","x","y","src","font","color","center"?,"bg"?,"w"?,"h"?}`
   - `src` = `{"lit":"...text..."}` or `{"slot":"string_slot"}`
   - `font` 1-7 (`{"lit":2}` normal, `{"lit":6}` big)
   - `center: true` = x is the horizontal centre (text is centred on screen)
+  - `bg` = an erase colour: the text blanks its own box before drawing, so a
+    value that changes every tick needs no `clear` (~6 ms vs ~61 ms). Leave it
+    out for text drawn over a button or a graph — it would paint over them.
+  - `w` / `h` = reserve a fixed erase box, for a value whose width changes (a
+    clock, a millisecond counter). Size `w` for the *longest* string, or the tail
+    of the previous longer string is left behind.
 - `rect` / `fillrect` → `{"x","y","w","h","color"}`
 - `line` → `{"x","y","w","h","color"}` (x,y = p1; w,h = p2)
 - `circle` → `{"x","y","r","color"}`
@@ -126,7 +135,8 @@ only. Display is 240x320 portrait.
 ## Checklist before flash
 
 1. `python3 tools/validate_behavior.py my-tool.json` → VALID
-2. Each screen's render set starts with `clear`
+2. Each NEW screen's first frame starts with `clear` — and **no** `clear` in any
+   repeating handler (use text `bg`, or `fillrect` the region you redraw)
 3. Slot names in guards/verbs/render match `state` exactly (validator checks)
 4. Every text render has a `src` (`{"lit":...}` or a string slot)
 5. Reaction/state-machine phases: model phase as an int64 slot + guarded handlers

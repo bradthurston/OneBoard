@@ -95,6 +95,25 @@ def r_text(d: ImageDraw.ImageDraw, rp: dict, slots: dict) -> None:
     txt = src_text(rp, slots)
     fnt = font(FONT_PX[f])
     fill = col(rp, slots)
+    # Self-erasing text: "bg" blanks the text's own box before drawing (mirrors
+    # vm.cpp). A screen clear is ~61 ms of SPI on the board; this box is ~10x
+    # cheaper, which is what lets a value update every tick without strobing.
+    if rp.get("bg") is not None:
+        bg = col({"color": rp["bg"]}, slots)
+        tb = d.textbbox((0, 0), txt, font=fnt)
+        tw, th = tb[2] - tb[0], tb[3] - tb[1]
+        # w/h reserve a fixed box, so a value whose width changes (a clock)
+        # never leaves the tail of a longer previous string behind.
+        bw = max(int(val(rp.get("w"), slots, 0) or 0), tw)
+        bh = max(int(val(rp.get("h"), slots, 0) or 0), th)
+        if rp.get("center"):
+            bx, by = max(0, x - bw / 2), max(0, y - bh / 2)
+        else:
+            bx, by = max(0, x), max(0, y)
+        bw, bh = min(bw, W - bx), min(bh, H - by)
+        box = _box(int(bx), int(by), int(bw), int(bh))
+        if box:
+            d.rectangle(box, fill=bg)
     if rp.get("center"):
         # MC_DATUM: x is the horizontal centre, y the vertical centre
         d.text((x, y), txt, font=fnt, fill=fill, anchor="mm")

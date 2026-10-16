@@ -169,6 +169,8 @@ struct __attribute__((packed)) RenderPrim {
   uint8_t src_slot;       // text source slot (0xFF = use text_literal)
   uint8_t font;
   uint8_t center;         // text: center horizontally around x (MC_DATUM)
+  uint8_t bg_idx;         // text: erase-box colour index, 0xFF = transparent
+  uint8_t bg_slot;        // text: slot holding the erase colour name
   char text[VM_STR_LEN];  // inline text when src_slot==0xFF
 };
 

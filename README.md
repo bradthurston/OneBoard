@@ -147,6 +147,11 @@ A behavior is JSON with **typed state slots** and **event handlers**:
   `div`/`mod` guard divide-by-zero (→ 0); `clamp` takes `{slot, min, max}`.
 - **Render primitives**: `clear`, `text`, `rect`, `fillrect`, `line`,
   `circle`, `bar`, `graph`. Colors from a fixed palette.
+- **`clear` is a full-screen fill** (~61 ms of SPI at 20 MHz, measured), so it
+  belongs at the start of a new screen — never inside a repeating tick. To update
+  a value every tick, give the text `"bg": "black"`: it blanks its own box first
+  (~6 ms, ~10x cheaper) and takes optional `w`/`h` to reserve a fixed box for a
+  value whose width changes. The validator warns about a fast-tick `clear`.
 - **Guards**: `eq ne lt le gt ge`, `is_true`, `elapsed_ge`, `always`.
 - **Limits**: 12 slots, 20 render primitives, 80 instructions, 6 events.
 

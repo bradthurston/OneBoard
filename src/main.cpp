@@ -337,6 +337,20 @@ bool loadBehaviorFromJson(const char* jsonStr) {
   // not wait for its first scheduled tick (and static screens shouldn't need
   // a tick at all). Mark the first matching handler's renders dirty and flush.
   vmMarkInitialRender(&g_state, &g_prog);
+  // A tool switch must not leave the previous tool's pixels behind, and we can't
+  // delegate that to the behaviour — an authored one may never clear. Clear only
+  // when the new tool's own first frame doesn't, so one load never pays for two
+  // full repaints back to back.
+  {
+    bool firstFrameClears = false;
+    for (uint8_t i = 0; i < g_prog.render_count; i++) {
+      if ((g_state.render_dirty & (1u << i)) && g_prog.renders[i].type == R_CLEAR) {
+        firstFrameClears = true;
+        break;
+      }
+    }
+    if (!firstFrameClears) tft.fillScreen(TFT_BLACK);
+  }
   vmRender(&g_state, &g_prog, &tft);
   drawHomeButton();
 
