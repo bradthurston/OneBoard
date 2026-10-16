@@ -8,15 +8,21 @@ arrived over the network.
 ## The one rule for this shoot
 
 **A plain upload is not a from-scratch board.** `pio run -t upload` leaves NVS and
-LittleFS intact, so the board keeps its saved WiFi and its cached store tools, and the
-launcher lists **eight** tools instead of four. For a genuinely fresh board you must
-**erase the flash first**. That also gets you:
+LittleFS intact, so the board keeps its saved WiFi and anything cached in LittleFS. For a
+genuinely fresh board you must **erase the flash first**. That also gets you:
 
-- `storeUrl` falling back to the compiled default (`http://192.168.4.100:8080`), which is
-  unreachable — so `loadStoreToolList()` finds no store tools and the launcher shows only
-  the builtins.
-- `seedDefaultBehaviors()` re-writing the four builtins into LittleFS on first boot.
 - A board that comes up in provisioning mode with an **open** access point (no password).
+- `seedDefaultBehaviors()` re-writing the four builtins into LittleFS on first boot.
+- No saved WiFi, so `loadStoreToolList()` is skipped entirely (`wifiStationOk` is false) and
+  the launcher shows only the builtins.
+
+One thing that changed and matters here: the board now **finds the store by itself** over
+mDNS, so "no `storeUrl`" no longer means "no store tools" — it finds the store as soon as
+it joins WiFi. What keeps the caption honest is that the store itself now ships **only the
+four builtins** (`examples/store-only/` is not served), so even once the board is on WiFi
+the launcher lists the same four rows. Purging LittleFS matters too: the launcher adds any
+cached behavior the store doesn't list, so a leftover cache copy of a deleted tool would
+show up as a row.
 
 If you film without erasing, the video contradicts its own caption. Before you roll, the
 launcher must list exactly these four, in this set (store order can vary):
@@ -29,8 +35,10 @@ timer
 ```
 
 Those are compiled into the firmware (`progmemBehavior()` / `seedDefaultBehaviors()` in
-`src/main.cpp`). Everything else in `behaviors/` is store-only and does not exist on a
-fresh board — including `multiplication-f`, `dice`, `stopwatch` and `two-buttons`.
+`src/main.cpp`), and they are also exactly what the store serves. The extras that used to
+be store-only — `multiplication-f`, `dice`, `stopwatch`, `two-buttons` — now live in
+`examples/store-only/`, which `serve.py` does not serve, so they cannot reach the launcher
+at all.
 
 ## Cast
 
@@ -132,7 +140,9 @@ python3 tools/render_frames.py --tour --builtins-only --out docs/media --hold-ms
 ```
 
 `--builtins-only` filters to the four firmware tools — the same set a from-scratch board
-has. Without it you get every tool in the store, which is not what this video claims.
+has, and the same set the store now serves. Keep the flag anyway: without it the renderer
+picks up whatever is in the store, so the GIF would silently grow a row if a tool were ever
+added there.
 
 Commit `docs/media/oneboard-demo.gif` (the README embeds it) and the capture JSON
 **together**, and only when the GIF was genuinely rendered from that take. GitHub will not

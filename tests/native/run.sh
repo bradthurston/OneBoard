@@ -8,4 +8,4 @@ trap 'rm -f "$binary"' EXIT
   -DARDUINOJSON_DEFAULT_NESTING_LIMIT=64 -Wno-deprecated-declarations -Wno-address-of-packed-member \
   -Itests/native/stubs -I"$ARDUINOJSON_DIR/src" -Isrc \
   src/vm.cpp tests/native/vm_regression.cpp -o "$binary"
-"$binary" behaviors/*.json
+"$binary" behaviors/*.json examples/store-only/*.json

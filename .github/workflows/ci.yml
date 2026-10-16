@@ -28,6 +28,11 @@ jobs:
           for f in behaviors/*.json; do
             python3 tools/validate_behavior.py "$f" || exit 1
           done
+          # The store-only examples aren't served, but they're still shipped as
+          # worked examples and must stay valid against the current vocabulary.
+          for f in examples/store-only/*.json; do
+            python3 tools/validate_behavior.py "$f" || exit 1
+          done
           echo "All behaviors validated."
 
       # The board loads the PROGMEM copy on a fresh flash, so a fix applied only

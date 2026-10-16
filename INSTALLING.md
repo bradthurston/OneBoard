@@ -192,7 +192,7 @@ board. It needs an OpenRouter API key:
 3. Author your first tool:
    ```bash
    cd OneBoard
-   python3 tools/validate_behavior.py behaviors/dice.json   # sanity check first
+   python3 tools/validate_behavior.py examples/store-only/dice.json   # sanity check first
    OPENROUTER_KEY_FILE=~/.openrouter_key \
      python3 tools/author.py "I want a dice roller that rolls 1-6" --board 192.168.1.206
    ```
@@ -201,8 +201,11 @@ The pipeline: LLM writes JSON against the board's vocabulary → validated →
 self-corrected on errors → saved to `behaviors/` → pushed live to the board
 via `/store` + `/load`. No reflash.
 
-> Six behaviors ship in `behaviors/` and are embedded in firmware as offline
-> fallbacks: timer, temp-logger, reaction-game, tap-counter, stopwatch, dice.
+> The store ships exactly the four tools the firmware comes with, so a fresh
+> store is never cluttered: timer, temp-logger, reaction-game, tap-counter.
+> Four more worked examples live in `examples/store-only/` (dice, stopwatch,
+> multiplication-f, two-buttons) — validated by CI, but not served, because a
+> store should not advertise tools a from-scratch board doesn't have.
 
 ---
 
@@ -249,7 +252,7 @@ via `/store` + `/load`. No reflash.
    systemctl --user daemon-reload
    systemctl --user enable --now oneboard-tg-bot
    ```
-5. In Telegram, message your bot: `/status`, `/tools`, `/load dice`, `/schema`, `/help`.
+5. In Telegram, message your bot: `/status`, `/tools`, `/load timer`, `/schema`, `/help`.
 
 > The env file (`oneboard-telegram.env`) must contain `ONBOARD_BOT_TOKEN`,
 > `ONBOARD_BOARD_IP`, `ONBOARD_STORE_URL`, and `ONBOARD_ALLOWED` (your Telegram

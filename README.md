@@ -196,7 +196,7 @@ bounded self-correction loop → `behaviors/<id>.json` → pushed live to the bo
 
 ### Validate a behavior offline
 ```bash
-python3 tools/validate_behavior.py behaviors/dice.json
+python3 tools/validate_behavior.py examples/store-only/dice.json   # sanity check first
 ```
 
 ### View the board's screen in any browser
@@ -231,14 +231,18 @@ python3 store/serve.py --port 8082
 
 ## Built-in behaviors
 
-`behaviors/` — the six shipped tools, all loadable over the wire from the store:
+`behaviors/` holds exactly the four tools that ship with the firmware, loadable
+over the wire from the store:
 
-`timer` · `temp-logger` · `reaction-game` · `tap-counter` · `stopwatch` · `dice`
+`timer` · `temp-logger` · `reaction-game` · `tap-counter`
 
-`timer`, `temp-logger`, `reaction-game` and `tap-counter` are also embedded in
-firmware as PROGMEM fallbacks (offline boot) — those four are protected from
-store deletion. Tools created by `/make` (or added to `behaviors/`) are
-store-only and can be deleted freely.
+All four are also embedded in firmware as PROGMEM fallbacks (offline boot), and
+those four are protected from store deletion. Tools created by `/make` (or added
+to `behaviors/`) are store-only and can be deleted freely.
+
+`examples/store-only/` keeps four more worked examples — `dice`, `stopwatch`,
+`multiplication-f`, `two-buttons` — deliberately outside `behaviors/` so a fresh
+store lists only what the firmware comes with. Copy one in to serve it.
 
 ---
 
