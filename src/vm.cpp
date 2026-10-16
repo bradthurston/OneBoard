@@ -1315,6 +1315,14 @@ void vmRender(VmState* state, const VmProgram* prog, TFT_eSPI* tft) {
         if (gh_h <= 0) { gy = 100; gh_h = 180; }
         int16_t botY = gy + gh_h;
 
+        // Erase the plot interior before drawing the trace. Without this the
+        // author has to clear the WHOLE screen to keep the graph honest (a
+        // 150 KB / ~61 ms SPI transfer), because the Y auto-scale moves the
+        // whole trace every sample and the old trace would ghost behind the new
+        // one. The interior is 218x178x2 = 78 KB, ~33 ms — the graph pays only
+        // for its own region. Assumes a black background: a graph over a
+        // coloured panel would erase it to black, so keep graphs on black.
+        tft->fillRect(gx + 1, gy + 1, gw - 2, gh_h - 2, TFT_BLACK);
         tft->drawRect(gx, gy, gw, gh_h, TFT_DARKGREY);
 
         // Auto-scale Y across the samples currently in the buffer.

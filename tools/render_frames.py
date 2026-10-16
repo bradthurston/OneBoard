@@ -171,7 +171,11 @@ def r_bar(d, rp, slots):
 def r_graph(d, rp, slots):
     """Frame only. The trace comes from the firmware's VM_GRAPH_SIZE ring
     buffer, which /state does not expose, so a freshly loaded graph shows an
-    empty frame - exactly what the panel shows on load."""
+    empty frame - exactly what the panel shows on load.
+
+    The firmware now erases the plot interior before drawing the trace (so a
+    graph no longer forces the author to clear the whole screen); each frame
+    here starts from a fresh image, so nothing to erase."""
     x, y = val(rp.get("x"), slots, 0), val(rp.get("y"), slots, 0)
     w, h = val(rp.get("w"), slots, 0), val(rp.get("h"), slots, 0)
     if w <= 0:

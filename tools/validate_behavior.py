@@ -135,7 +135,7 @@ class Behavior:
         ms = sched.get("ms")
         if not isinstance(ms, (int, float)) or ms <= 0:
             return
-        clears = self._count_clears(handlers)
+        clears = self._count_repeating_clears(handlers)
         if not clears or ms >= 1000:
             return
         duty = min(100.0, SCREEN_CLEAR_MS / ms * 100)
@@ -148,6 +148,25 @@ class Behavior:
             f"changes instead: text takes \"bg\" (blanks its own box) or fillrect "
             f"the region you redraw."
         )
+
+    def _count_repeating_clears(self, handlers):
+        """Clears that provably run on EVERY tick: only handlers that always match.
+
+        A clear gated on state (a handler guarded `eq phase 0`) or nested in an
+        `if` that watches elapsed time fires when the SCREEN changes, which is
+        exactly what the rule asks for — warning on those is crying wolf, and a
+        warning that fires on correct authoring trains people to ignore it.
+        """
+        count = 0
+        for h in handlers or []:
+            if not isinstance(h, dict):
+                continue
+            g = h.get("guard")
+            op = g.get("op") if isinstance(g, dict) else None
+            if op not in (None, "always"):
+                continue
+            count += self._count_clears([h])
+        return count
 
     def _count_clears(self, handlers):
         count = 0

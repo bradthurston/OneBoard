@@ -117,7 +117,10 @@ darkgray grey gray`.
 - `line` → `{"x","y","w","h","color"}` (x,y = p1; w,h = p2)
 - `circle` → `{"x","y","r","color"}`
 - `bar` → `{"x","y","w","h","color","src","max","px"}` (w may be `{"slot":...}`)
-- `graph` → `{"x","y","w","h","color","slot"}` (`slot` = float slot to graph)
+- `graph` → `{"x","y","w","h","color","slot"}` (`slot` = float slot to graph).
+  The graph erases its own plot interior (to black — keep graphs on a black
+  background) before drawing the trace, so it needs no `clear` and can update on
+  a fast tick.
 
 ## Value refs — the #1 gotcha
 

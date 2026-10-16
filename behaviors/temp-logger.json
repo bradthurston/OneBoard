@@ -7,7 +7,8 @@
     {"name": "last_tick",  "type": "int64",  "init": 0},
     {"name": "sample_idx", "type": "int64",  "init": 0},
     {"name": "sample_cnt", "type": "int64",  "init": 0},
-    {"name": "temp_txt",   "type": "string", "init": "72.0 F"}
+    {"name": "temp_txt",   "type": "string", "init": "72.0 F"},
+    {"name": "first",      "type": "int64",  "init": 0}
   ],
   "events": [
     {
@@ -15,7 +16,7 @@
       "schedule": {"type": "interval", "ms": 250},
       "handlers": [
         {
-          "guard": {"op": "always"},
+          "guard": {"op": "eq", "a": {"slot": "first"}, "b": {"lit": 0}},
           "run": [
             {"stamp": {"slot": "last_tick"}},
             {"add": {"slot": "temp", "delta": {"noise": {"lo": -2.0, "hi": 2.0}}}},
@@ -25,7 +26,20 @@
             {"render": {"type": "clear", "color": "black"}},
             {"render": {"type": "text", "x": {"lit": 80}, "y": {"lit": 40}, "src": {"lit": "Temp Logger"}, "font": {"lit": 2}, "color": "yellow"}},
             {"render": {"type": "text", "x": {"lit": 70}, "y": {"lit": 70}, "src": {"slot": "temp_txt"}, "font": {"lit": 4}, "color": "cyan"}},
-            {"render": {"type": "rect", "x": {"lit": 10}, "y": {"lit": 100}, "w": {"lit": 220}, "h": {"lit": 180}, "color": "darkgrey"}},
+            {"render": {"type": "graph", "slot": {"slot": "temp"}}},
+            {"add": {"slot": "sample_idx", "delta": {"lit": 1}}},
+            {"if": {"guard": {"op": "lt", "a": {"slot": "sample_cnt"}, "b": {"lit": 100}}, "then": [{"add": {"slot": "sample_cnt", "delta": {"lit": 1}}}]}},
+            {"set": {"slot": "first", "value": {"lit": 1}}}
+          ]
+        },
+        {
+          "run": [
+            {"stamp": {"slot": "last_tick"}},
+            {"add": {"slot": "temp", "delta": {"noise": {"lo": -2.0, "hi": 2.0}}}},
+            {"if": {"guard": {"op": "lt", "a": {"slot": "temp"}, "b": {"lit": 60}}, "then": [{"setf": {"slot": "temp", "value": {"lit": 60}}}]}},
+            {"if": {"guard": {"op": "gt", "a": {"slot": "temp"}, "b": {"lit": 90}}, "then": [{"setf": {"slot": "temp", "value": {"lit": 90}}}]}},
+            {"format": {"slot": "temp_txt", "op": "temp", "src": {"slot": "temp"}}},
+            {"render": {"type": "text", "x": {"lit": 70}, "y": {"lit": 70}, "src": {"slot": "temp_txt"}, "font": {"lit": 4}, "color": "cyan", "bg": "black", "w": {"lit": 140}, "h": {"lit": 28}}},
             {"render": {"type": "graph", "slot": {"slot": "temp"}}},
             {"add": {"slot": "sample_idx", "delta": {"lit": 1}}},
             {"if": {"guard": {"op": "lt", "a": {"slot": "sample_cnt"}, "b": {"lit": 100}}, "then": [{"add": {"slot": "sample_cnt", "delta": {"lit": 1}}}]}}

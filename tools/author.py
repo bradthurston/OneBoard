@@ -126,6 +126,7 @@ RENDER TYPES (fields each accepts):
 - circle:     x y r color
 - bar:        x y w h color src max px      w may be {"slot":n} (progress width)
 - graph:      x y w h color slot            slot = float slot to graph (ring buffer)
+                                           (erases its own plot interior — no clear needed)
 Fonts 1-7 (font 2 normal, font 6 big). Colors: black white red green blue
 yellow cyan magenta orange navy darkgrey darkgray grey gray.
 
