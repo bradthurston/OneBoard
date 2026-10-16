@@ -150,6 +150,21 @@ play an MP4 from a committed path — attach the hero video to a release
 (`gh release upload vX.Y docs/media/oneboard-demo-panel.mp4`) or drag it into an issue and
 paste the `user-attachments` URL.
 
+## Verifying a take before you cut it
+
+A contact sheet per clip (ffmpeg 3 stills at 15/50/85% → tile with PIL) tells you what each
+clip actually contains — read it with a vision model, don't trust the filename.
+
+To prove or disprove panel flicker in footage, pull **consecutive** frames, not samples:
+at 30 fps a 100 ms clear shows up as *blank on every third frame*. A 12-frame burst at
+1/30 s spacing (tile 6x2, label each timestamp) is enough for a vision read to state which
+frames are blank — and the timestamps make the period obvious (blank at ...,033/,133/,233/333 s
+= a 100 ms tick). Sampling every second instead can miss a 61% duty cycle entirely, and the
+flicker only exists while the tool is *running*: an idle 00:00 stopwatch is a clean panel.
+
+Don't measure brightness over a fixed crop to find it — the board drifts in frame and a crop
+that isn't pinned to the LCD reads the bench, not the panel. Eyeball the burst instead.
+
 ## Honest labelling — put this in the video description or a comment
 
 The GIF is rendered from the board's live `/status` + `/state` and the tool's own behavior
