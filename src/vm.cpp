@@ -118,6 +118,29 @@ static bool compileFail(VmProgram* prog, const char* fmt, ...) {
   return false;
 }
 
+// Validate every slot reference (including render bindings) before emitting code.
+// Source indices are resolved against the JSON array, so declarations must not
+// be skipped or truncated: JSON indices must equal compiled slot indices.
+static bool validateSlotRefs(JsonVariant value, const JsonArray& slots,
+                             VmProgram* prog, unsigned depth = 0) {
+  if (depth > 64) return compileFail(prog, "behavior nesting exceeds 64");
+  if (value.is<JsonObject>()) {
+    JsonObject object = value.as<JsonObject>();
+    if (object["slot"].is<const char*>()) {
+      const char* name = object["slot"];
+      int index = resolveSlotIndex(slots, name);
+      if (index < 0 || index >= VM_MAX_SLOTS)
+        return compileFail(prog, "unknown slot '%s'", name);
+    }
+    for (JsonPair member : object)
+      if (!validateSlotRefs(member.value(), slots, prog, depth + 1)) return false;
+  } else if (value.is<JsonArray>()) {
+    for (JsonVariant member : value.as<JsonArray>())
+      if (!validateSlotRefs(member, slots, prog, depth + 1)) return false;
+  }
+  return true;
+}
+
 // ============================================================
 // Compile a guard JSON object → Guard struct
 // Returns false on a real error (unknown op), sets prog->compile_error.
@@ -167,7 +190,7 @@ static bool compileBlock(const JsonArray& rootState, const JsonArray& block,
 static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
                        VmProgram* prog) {
   uint8_t n = prog->instr_count;
-  if (n >= VM_MAX_INSTRUCTIONS - 4)  // need room for worst case (if block)
+  if (n >= VM_MAX_INSTRUCTIONS)  // each nested verb checks its own emission
     return compileFail(prog, "instruction limit (%d) exceeded", VM_MAX_INSTRUCTIONS) ? -1 : -1;
 
   Instr* instr = &prog->instrs[n];
@@ -331,19 +354,20 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
     if (idx < 0) return compileFail(prog, "progress: unknown slot '%s'", slotName ? slotName : "(none)") ? -1 : -1;
     instr->op = OP_PROGRESS;
     instr->dst = (uint8_t)idx;
-    // Defaults: max=1, px=220 when the JSON field is absent (parseSource
-    // leaves the value untouched on null, so seed before parsing).
+    // Defaults apply only when absent; parseSource resets null operands to 0.
     instr->b_ty = SRC_LIT; instr->b_slot = 0xFF; instr->b_val = 1;
     instr->c_ty = SRC_LIT; instr->c_slot = 0xFF; instr->c_val = 220;
     // src -> operand A
     instr->a_ty = parseSource(p["src"], rootState, &instr->a_slot,
                                &instr->a_val, NULL);
     // max -> operand B
-    instr->b_ty = parseSource(p["max"], rootState, &instr->b_slot,
-                               &instr->b_val, NULL);
+    if (!p["max"].isNull())
+      instr->b_ty = parseSource(p["max"], rootState, &instr->b_slot,
+                                 &instr->b_val, NULL);
     // px -> operand C (own storage)
-    instr->c_ty = parseSource(p["px"], rootState, &instr->c_slot,
-                               &instr->c_val, NULL);
+    if (!p["px"].isNull())
+      instr->c_ty = parseSource(p["px"], rootState, &instr->c_slot,
+                                 &instr->c_val, NULL);
     prog->instr_count++;
     return 1;
   }
@@ -491,7 +515,7 @@ static int compileVerb(const JsonArray& rootState, const JsonObject& verb,
 
   // Unknown verb — this used to silently skip, which let a tool "load OK"
   // while missing its behavior entirely. Now it's a hard compile error.
-  const char* k = verb.begin()->key().c_str();
+  const char* k = verb.size() ? verb.begin()->key().c_str() : "(none)";
   return compileFail(prog, "unknown verb '%s'", k ? k : "(none)") ? -1 : -1;
 }
 
@@ -504,7 +528,10 @@ static bool compileBlock(const JsonArray& rootState, const JsonArray& block,
   if (!block) { *out_start = 0; *out_count = 0; return true; }
   *out_start = prog->instr_count;
   *out_count = 0;
-  for (JsonObject verb : block) {
+  for (JsonVariant entry : block) {
+    if (!entry.is<JsonObject>() || entry.as<JsonObject>().size() != 1)
+      return compileFail(prog, "each instruction must contain exactly one verb");
+    JsonObject verb = entry.as<JsonObject>();
     int n = compileVerb(rootState, verb, prog);
     if (n < 0) return false;   // hard error — abort the whole compile
     *out_count += n;
@@ -523,13 +550,35 @@ bool vmCompile(const JsonObject& root, VmProgram* prog) {
   if (!id) return compileFail(prog, "missing 'id'");
   strncpy(prog->id, id, sizeof(prog->id) - 1);
 
+  if (!root["state"].isNull() && !root["state"].is<JsonArray>())
+    return compileFail(prog, "state must be an array");
   JsonArray stateDef = root["state"];
+  if (stateDef.size() > VM_MAX_SLOTS)
+    return compileFail(prog, "slot limit (%d) exceeded", VM_MAX_SLOTS);
+  for (JsonVariant entry : stateDef) {
+    if (!entry.is<JsonObject>() || !entry["name"].is<const char*>() ||
+        !entry["type"].is<const char*>())
+      return compileFail(prog, "each slot needs a name and type");
+    const char* name = entry["name"];
+    const char* type = entry["type"];
+    if (!name[0] || strlen(name) >= sizeof(prog->slots[0].name))
+      return compileFail(prog, "slot name must be 1-15 characters");
+    if (strcmp(type, "int64") && strcmp(type, "float") &&
+        strcmp(type, "bool") && strcmp(type, "string"))
+      return compileFail(prog, "unknown slot type '%s'", type);
+    unsigned matches = 0;
+    for (JsonObject other : stateDef)
+      if (other["name"].is<const char*>() &&
+          strcmp(name, other["name"].as<const char*>()) == 0) ++matches;
+    if (matches != 1) return compileFail(prog, "duplicate slot '%s'", name);
+  }
+  if (!validateSlotRefs(root, stateDef, prog)) return false;
 
   // --- State slots ---
   if (stateDef) {
     for (JsonObject s : stateDef) {
       uint8_t i = prog->slot_count;
-      if (i >= VM_MAX_SLOTS) break;
+      if (i >= VM_MAX_SLOTS) return compileFail(prog, "slot limit exceeded");
       const char* name = s["name"];
       const char* type = s["type"];
       if (!name || !type) continue;
@@ -556,11 +605,13 @@ bool vmCompile(const JsonObject& root, VmProgram* prog) {
   }
 
   // --- Events ---
+  if (!root["events"].isNull() && !root["events"].is<JsonArray>())
+    return compileFail(prog, "events must be an array");
   JsonArray events = root["events"];
   if (events) {
     for (JsonObject ev : events) {
       uint8_t ei = prog->event_count;
-      if (ei >= VM_MAX_EVENTS) break;
+      if (ei >= VM_MAX_EVENTS) return compileFail(prog, "event limit (%d) exceeded", VM_MAX_EVENTS);
 
       const char* evName = ev["name"];
       if (evName) strncpy(prog->events[ei].name, evName,
@@ -584,11 +635,11 @@ bool vmCompile(const JsonObject& root, VmProgram* prog) {
       if (handlers) {
         for (JsonObject h : handlers) {
           uint8_t hi = prog->events[ei].handler_count;
-          if (hi >= VM_MAX_HANDLERS) break;
+          if (hi >= VM_MAX_HANDLERS) return compileFail(prog, "handler limit (%d) exceeded", VM_MAX_HANDLERS);
 
           // Compile guard
           uint8_t gi = prog->guard_count;
-          if (gi >= VM_MAX_GUARDS) break;
+          if (gi >= VM_MAX_GUARDS) return compileFail(prog, "guard limit (%d) exceeded", VM_MAX_GUARDS);
           if (!compileGuard(stateDef, h["guard"], &prog->guards[gi], prog))
             return false;
           prog->guard_count++;
@@ -645,6 +696,28 @@ void vmStateInit(VmState* state, const VmProgram* prog) {
 // ============================================================
 static bool evalGuard(const VmState* state, const Guard* g, unsigned long now);
 
+// Follow only the selected branches; do not execute state-changing verbs.
+static void markInitialRange(VmState* state, const VmProgram* prog,
+                             uint8_t start, uint8_t count) {
+  const unsigned end = unsigned(start) + count;
+  for (unsigned pc = start; pc < end;) {
+    const Instr& instruction = prog->instrs[pc];
+    if (instruction.op == OP_RENDER) {
+      state->render_dirty |= (1u << instruction.dst);
+    } else if (instruction.op == OP_IF) {
+      const unsigned thenCount = instruction.a_val;
+      const unsigned elseCount = instruction.b_val;
+      if (evalGuard(state, &prog->guards[instruction.dst], 0))
+        markInitialRange(state, prog, pc + 1, thenCount);
+      else
+        markInitialRange(state, prog, pc + 1 + thenCount, elseCount);
+      pc += 1 + thenCount + elseCount;
+      continue;
+    }
+    ++pc;
+  }
+}
+
 void vmMarkInitialRender(VmState* state, const VmProgram* prog) {
   state->render_dirty = 0;
   // Evaluate against the initial state; stamps are 0 so elapsed_ge is false.
@@ -655,12 +728,7 @@ void vmMarkInitialRender(VmState* state, const VmProgram* prog) {
       const Handler* h = &ev->handlers[hi];
       const Guard* g = &prog->guards[h->guard_idx];
       if (!evalGuard(state, g, now)) continue;
-      // First match wins — mark this handler's render instructions dirty
-      uint8_t end = h->instr_start + h->instr_count;
-      for (uint8_t pc = h->instr_start; pc < end; pc++) {
-        if (prog->instrs[pc].op == OP_RENDER)
-          state->render_dirty |= (1u << prog->instrs[pc].dst);
-      }
+      markInitialRange(state, prog, h->instr_start, h->instr_count);
       break;
     }
   }
@@ -817,7 +885,7 @@ static int execInstr(VmState* state, const VmProgram* prog,
     case OP_FMT_MS: {
       int64_t ms = srcInt(state, instr->a_ty, instr->a_slot, instr->a_val);
       char b[12];
-      snprintf(b, sizeof(b), "%02lld:%02lld", ms / 60000, (ms % 60000) / 1000);
+      snprintf(b, sizeof(b), "%02lld:%02lld", (long long)(ms / 60000), (long long)((ms % 60000) / 1000));
       strncpy(state->sval[instr->dst], b, VM_STR_LEN - 1);
       return 1;
     }
@@ -833,7 +901,7 @@ static int execInstr(VmState* state, const VmProgram* prog,
     case OP_FMT_REACT: {
       int64_t ms = srcInt(state, instr->a_ty, instr->a_slot, instr->a_val);
       char b[16];
-      snprintf(b, sizeof(b), "%lld ms", ms);
+      snprintf(b, sizeof(b), "%lld ms", (long long)ms);
       strncpy(state->sval[instr->dst], b, VM_STR_LEN - 1);
       return 1;
     }
@@ -841,7 +909,7 @@ static int execInstr(VmState* state, const VmProgram* prog,
     case OP_FMT_INT: {
       int64_t v = srcInt(state, instr->a_ty, instr->a_slot, instr->a_val);
       char b[16];
-      snprintf(b, sizeof(b), "%lld", v);
+      snprintf(b, sizeof(b), "%lld", (long long)v);
       strncpy(state->sval[instr->dst], b, VM_STR_LEN - 1);
       return 1;
     }

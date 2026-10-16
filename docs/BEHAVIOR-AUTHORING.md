@@ -8,7 +8,8 @@ and becomes the tool — no reflash. Validate before loading:
 > unknown slots, unknown format/render/guard ops, and limit overflows — a bad
 > behavior does NOT load "ok". `/load` returns `{"ok":false,"error":"<reason>"}`
 > (e.g. `unknown verb 'increment'`, `set: unknown slot 'missing'`), and the web
-> UI alerts it. There is no case where a broken behavior silently loads.
+> UI alerts it. These checks reject the errors listed above; they do not prove a tool
+> implements the behavior its author intended.
 
 ## Structure
 
@@ -129,3 +130,23 @@ only. Display is 240x320 portrait.
 3. Slot names in guards/verbs/render match `state` exactly (validator checks)
 4. Every text render has a `src` (`{"lit":...}` or a string slot)
 5. Reaction/state-machine phases: model phase as an int64 slot + guarded handlers
+
+## VM regression checks
+
+The native suite compiles the actual `src/vm.cpp` with ArduinoJson 7 and
+lightweight Arduino/display stubs; it does not simulate electrical hardware.
+It checks compiler limits and slot references, progress defaults, initial render
+branch selection without state mutation, and compilation of all shipped tools.
+GitHub Actions runs it with AddressSanitizer alongside the firmware build matrix.
+
+To run locally with g++ and an ArduinoJson 7 checkout:
+
+```bash
+ARDUINOJSON_DIR=/path/to/ArduinoJson tests/native/run.sh
+```
+
+Initial-screen selection evaluates nested `if` guards against initial state and
+marks only the selected branches for drawing. It does not execute state writes.
+Slot names must be unique, nonempty, and at most 15 characters. Invalid slot
+declarations and references, and slot/event/handler/guard/instruction/render
+capacity overflows, fail compilation rather than truncating the tool.

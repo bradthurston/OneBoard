@@ -98,7 +98,7 @@ enum RenderType : uint8_t {
 };
 
 // ============================================================
-// Packed instruction — 16 bytes
+// Packed instruction — 20 bytes
 // ============================================================
 struct __attribute__((packed)) Instr {
   uint8_t op;       // VmOp
@@ -114,8 +114,10 @@ struct __attribute__((packed)) Instr {
   int32_t c_val;
 };
 
+static_assert(sizeof(Instr) == 20, "instruction layout changed");
+
 // ============================================================
-// Guard — 12 bytes
+// Guard — 13 bytes
 // ============================================================
 struct __attribute__((packed)) Guard {
   uint8_t op;       // VmGuard

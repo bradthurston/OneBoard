@@ -30,6 +30,18 @@ jobs:
           done
           echo "All behaviors validated."
 
+  vm-regression:
+    name: VM regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch ArduinoJson 7.4.2
+        run: git clone --depth 1 --branch v7.4.2 https://github.com/bblanchon/ArduinoJson.git "$RUNNER_TEMP/ArduinoJson"
+      - name: Compile and execute the VM with AddressSanitizer
+        env:
+          ARDUINOJSON_DIR: ${{ runner.temp }}/ArduinoJson
+        run: tests/native/run.sh
+
   build-firmware:
     name: Build (${{ matrix.env }})
     runs-on: ubuntu-latest
@@ -69,7 +81,7 @@ jobs:
   ci-summary:
     name: CI summary
     runs-on: ubuntu-latest
-    needs: [validate-behaviors, build-firmware]
+    needs: [validate-behaviors, vm-regression, build-firmware]
     if: always()
     steps:
       - run: |
@@ -77,3 +89,4 @@ jobs:
           echo "build-firmware:     ${{ needs.build-firmware.result }}"
           test "${{ needs.validate-behaviors.result }}" = "success"
           test "${{ needs.build-firmware.result }}" = "success"
+          test "${{ needs.vm-regression.result }}" = "success"
