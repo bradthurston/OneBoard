@@ -196,8 +196,10 @@ String        lastLoadError = "";   // human-readable reason for the last failed
 bool          homeMode = false;      // true = showing the home/tool menu
 #define HOME_BTN_X 0                 // top-left corner: reserved for home
 #define HOME_BTN_Y 0
-#define HOME_BTN_W 22
-#define HOME_BTN_H 22
+// Touch hitbox stays a comfortable ~24px even though the drawn arrow is tiny
+// (~11px), so the icon looks small but is still easy to hit.
+#define HOME_BTN_W 24
+#define HOME_BTN_H 24
 #define HOME_LIST_MAX 24             // tools we can list (store + builtins)
 #define HOME_ROW_H 30                // vertical pitch of each tool row
 #define HOME_LIST_Y 44               // first row's y (below title)
@@ -473,13 +475,13 @@ static int loadStoreToolList() {
 
 // Draw the small persistent home button glyph in the top-left corner.
 void drawHomeButton() {
-  tft.fillRect(HOME_BTN_X, HOME_BTN_Y, HOME_BTN_W, HOME_BTN_H, TFT_DARKGREY);
-  tft.drawRect(HOME_BTN_X, HOME_BTN_Y, HOME_BTN_W, HOME_BTN_H, TFT_YELLOW);
-  // roof (triangle) + body (rect) = a house, sized to fit the smaller button
-  tft.fillTriangle(HOME_BTN_X + 2,  HOME_BTN_Y + 9,
-                   HOME_BTN_X + 11, HOME_BTN_Y + 2,
-                   HOME_BTN_X + 20, HOME_BTN_Y + 9, TFT_YELLOW);
-  tft.fillRect(HOME_BTN_X + 4, HOME_BTN_Y + 9, 14, 10, TFT_YELLOW);
+  // Small back-arrow (return) glyph, top-left, drawn on top of the corner.
+  // No filled box — just the arrow, so it reads as a control affordance.
+  uint16_t cx = HOME_BTN_X + 6;   // arrow left edge (a little inset from corner)
+  uint16_t cy = HOME_BTN_Y + 6;   // arrow top
+  // arrowhead + shaft, ~11px tall/wide
+  tft.fillRect(cx + 5, cy + 4, 6, 3, TFT_YELLOW);          // shaft
+  tft.fillTriangle(cx + 1, cy + 5, cx + 8, cy + 1, cx + 8, cy + 11, TFT_YELLOW); // head
 }
 
 // Show the home screen (title + list of tools). Scrolls when > rows fit.
