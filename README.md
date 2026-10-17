@@ -21,10 +21,14 @@ self-description: a web page, a Telegram bot, or an LLM.
 
 ![OneBoard running its built-in tools on a single board, no reflash](docs/media/oneboard-demo.gif)
 
-One board, four tools, no reflash. These are the behaviors compiled into the
-firmware itself — nothing is fetched, nothing is re-flashed. The panel is rendering
-from the board's own self-description, the same `/schema` + `/state` + behavior JSON
-any client reads.
+**[▶ Watch the 57 s demo](https://github.com/bradthurston/OneBoard/releases/latest)**
+— the board changing what it does over WiFi, in one unbroken take, no reflash.
+
+The GIF is the board's four built-in tools — compiled into the firmware itself,
+nothing fetched, nothing re-flashed, drawn from the board's own self-description
+(the same `/schema` + `/state` + behavior JSON any client reads). The video above
+is the other half of the point: those tools come from a store, so changing one is
+a file write, not a firmware flash.
 
 Shooting it yourself: [`docs/DEMO-SHOTLIST.md`](docs/DEMO-SHOTLIST.md) covers the
 from-scratch take (erase, flash, first boot, captive portal, then the builtins),
