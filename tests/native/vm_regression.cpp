@@ -185,9 +185,54 @@ static void selfErasingText() {
   { auto d = build(false, false, true); draw(d, 1); }
 }
 
+// Long text literals. RenderOp.text is a fixed char[VM_STR_LEN] and the compile
+// step copies into it with strncpy(dst, src, VM_STR_LEN - 1) — anything longer is
+// TRUNCATED, with no error and no warning. On hardware that reads as a misspelled
+// word on the panel: the timer's "Touch to pause/resume" (21 chars) drew as
+// "Touch to pause/resu" against a 20-byte buffer, on a 240 px screen where the
+// whole string is only 139 px wide and fits with 100 px to spare. Nothing in the
+// behaviour JSON was wrong — the buffer was too small.
+static void longLiteralText() {
+  TFT_eSPI tft;
+  auto draw = [&](const char* lit) {
+    // Assemble as JSON text: the literal is inserted verbatim (these test
+    // strings contain no quotes or backslashes).
+    std::string json = R"({"id":"t","state":[{"name":"n","type":"int64","init":0}],)"
+                       R"("events":[{"name":"tick","schedule":{"type":"interval","ms":250},)"
+                       R"("handlers":[{"run":[{"render":{"type":"text","x":{"lit":20},)"
+                       R"("y":{"lit":210},"src":{"lit":")" + std::string(lit) +
+                       R"("},"font":{"lit":2},"color":"white"}}]}]}]})";
+    JsonDocument d;
+    assert(!deserializeJson(d, json));
+    VmProgram p; VmState s;
+    assert(vmCompile(d.as<JsonObject>(), &p));
+    vmStateInit(&s, &p);
+    vmMarkInitialRender(&s, &p);
+    TFT_eSPI::resetCalls();
+    vmRender(&s, &p, &tft);
+    assert(TFT_eSPI::text_calls == 1);
+    return std::string(TFT_eSPI::last_text);
+  };
+  // The real one from the panel: 21 chars, and it fits the screen easily.
+  assert(draw("Touch to pause/resume") == "Touch to pause/resume");
+  assert(draw("Provisioning: 192.168.4.1") == "Provisioning: 192.168.4.1");
+  assert(draw("Tap to pause or resume") == "Tap to pause or resume");
+  // Boundary is derived from VM_STR_LEN, not hardcoded: a literal of exactly
+  // VM_STR_LEN-1 chars survives whole.
+  std::string atLimit(VM_STR_LEN - 1, 'A');
+  assert(draw(atLimit.c_str()) == atLimit);
+  // ...and one char longer still truncates, by design. That is why
+  // tools/validate_behavior.py refuses a literal over the limit: the VM can only
+  // shorten it silently, and a shorter word on the panel looks like a typo.
+  std::string overLimit(VM_STR_LEN + 4, 'B');
+  std::string got = draw(overLimit.c_str());
+  assert(got.size() == VM_STR_LEN - 1);
+  assert(got == overLimit.substr(0, VM_STR_LEN - 1));
+}
+
 int main(int argc,char** argv) {
   limits(); renderLimit(); references(); progress(); mathVerbs(); initialBranches();
-  selfErasingText();
+  selfErasingText(); longLiteralText();
   for(int i=1;i<argc;++i) {
     std::ifstream input(argv[i]); JsonDocument doc; assert(!deserializeJson(doc,input));
     VmProgram p; if(!vmCompile(doc.as<JsonObject>(),&p)) { std::cerr<<argv[i]<<": "<<p.compile_error<<"\n"; return 1; }

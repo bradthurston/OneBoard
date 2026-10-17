@@ -10,15 +10,26 @@ public:
   static inline int fillScreen_calls = 0;
   static inline int fillRect_calls = 0;
   static inline int16_t last_fr_x = 0, last_fr_y = 0, last_fr_w = 0, last_fr_h = 0;
+  // Text recorder: the VM copies a text literal into a fixed char[VM_STR_LEN]
+  // buffer, so a test can prove a long literal arrives whole instead of being
+  // silently truncated to VM_STR_LEN-1 characters.
+  static inline char last_text[128] = {0};
+  static inline int text_calls = 0;
   static void resetCalls() {
-    fillScreen_calls = fillRect_calls = 0;
+    fillScreen_calls = fillRect_calls = text_calls = 0;
     last_fr_x = last_fr_y = last_fr_w = last_fr_h = 0;
+    last_text[0] = 0;
   }
 
   void fillScreen(uint16_t) { ++fillScreen_calls; }
   void setTextColor(uint16_t) {}
   void setTextDatum(uint8_t) {}
-  void drawString(const char*, int16_t, int16_t, uint8_t) {}
+  void drawString(const char* s, int16_t, int16_t, uint8_t) {
+    ++text_calls;
+    size_t i = 0;
+    if (s) for (; s[i] && i < sizeof(last_text) - 1; ++i) last_text[i] = s[i];
+    last_text[i] = 0;
+  }
   void drawRect(int16_t, int16_t, int16_t, int16_t, uint16_t) {}
   void fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t) {
     ++fillRect_calls; last_fr_x = x; last_fr_y = y; last_fr_w = w; last_fr_h = h;

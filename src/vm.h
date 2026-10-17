@@ -20,7 +20,15 @@
 #define VM_MAX_INSTRUCTIONS 80
 #define VM_MAX_GUARDS       12
 #define VM_MAX_RENDER       20
-#define VM_STR_LEN          20    // string slot capacity
+#define VM_STR_LEN          40    // string slot capacity, and the hard ceiling on
+                                  // a text literal: compile copies with
+                                  // strncpy(..., VM_STR_LEN - 1), so a longer
+                                  // literal is TRUNCATED SILENTLY and reads on
+                                  // the panel as a misspelled word (the timer's
+                                  // "Touch to pause/resume" -> "Touch to
+                                  // pause/resu" at 20). tools/validate_behavior.py
+                                  // errors on a literal over the limit; keep the
+                                  // three in sync.
 #define VM_GRAPH_SIZE       100   // FIFO ring for graph render
 
 // ============================================================

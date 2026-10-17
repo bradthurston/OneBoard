@@ -206,9 +206,15 @@ on the panel at all.
   `Joined <ssid> -- <ip>` line and *then* load the tool, so the panel answers when setup
   succeeds. Until that lands, a cut either omits shot 4 or says in the description that the
   first-boot screen is there for a moment before the tool loads.
-- **The timer's own caption truncates on the panel.** `Touch to pause/resume` runs off the
-  240 px screen edge (`Touch to pause/resu`). Visible in footage; shorten the string or widen
-  the box.
+- **The timer's hint line was being truncated by the VM, not by the layout.** `Touch to
+  pause/resume` drew as `Touch to pause/resu`. The first write-up here blamed the 240 px panel
+  and suggested shortening the string — that was wrong, and it would have treated the symptom.
+  TFT_eSPI's own font-2 width table puts the string at **139 px**, i.e. comfortably inside 240.
+  The real cause: `RenderOp.text` is `char[VM_STR_LEN]` and `vm.cpp` fills it with
+  `strncpy(..., VM_STR_LEN - 1)`, so at `VM_STR_LEN 20` every literal lost its tail silently —
+  no error, no warning, just a misspelled word on the panel. Fixed: `VM_STR_LEN` is now 40, the
+  validator errors on a literal over the limit, and a regression test asserts a 21-char literal
+  reaches the panel whole.
 - **`temp-logger`'s axis labels** used to print static `90F`/`60F` while `R_GRAPH`
   auto-scales Y to its ring buffer — labels describing an axis that didn't exist — and they
   sat at x=215, *inside* the graph frame (10..230), so the trace drew through them. Removed

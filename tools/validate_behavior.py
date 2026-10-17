@@ -16,6 +16,8 @@ Exit 0 = valid (or warnings only), 1 = errors found.
 """
 import argparse
 import json
+import os
+import re
 import sys
 
 # --- Vocabulary (mirrors src/vm.cpp — keep in sync) ---
@@ -48,6 +50,31 @@ RENDER_FIELDS = {
 # ~61 ms of black. Nothing can hide it: the ESP32-WROOM-32E has no PSRAM, and a
 # 16-bit full-frame buffer would be 150 KB, i.e. the whole usable heap.
 SCREEN_CLEAR_MS = 61.0
+
+
+# The VM's string capacity, read from src/vm.h so the limit can never drift from
+# the firmware. A text literal or a string-slot init longer than VM_STR_LEN-1 is
+# copied with strncpy(..., VM_STR_LEN - 1) and TRUNCATED with no error and no
+# warning. On the panel that reads as a misspelled word, which is exactly how it
+# was reported from hardware 2026-10-17: the timer's "Touch to pause/resume"
+# (21 chars) displayed as "Touch to pause/resu" against a 20-byte buffer. The
+# string fit the screen easily (139 px of 240), so no amount of layout care
+# would have found it. Enforce the ceiling here instead.
+def _read_vm_str_len():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir,
+                        "src", "vm.h")
+    try:
+        with open(path) as fh:
+            m = re.search(r"#define\s+VM_STR_LEN\s+(\d+)", fh.read())
+            if m:
+                return int(m.group(1))
+    except OSError:
+        pass
+    return 40  # fallback — keep in sync with src/vm.h
+
+
+VM_STR_LEN = _read_vm_str_len()
+MAX_LITERAL = VM_STR_LEN - 1
 
 
 class Behavior:
@@ -200,6 +227,14 @@ class Behavior:
             self.err(f"slot '{name}': bad type {typ!r} (want {sorted(SLOT_TYPES)})")
         if "init" not in s:
             self.warn(f"slot '{name}' has no 'init'")
+        if typ == "string":
+            init = s.get("init")
+            if isinstance(init, dict) and "lit" in init:
+                init = init["lit"]
+            if isinstance(init, str) and len(init) > MAX_LITERAL:
+                self.err(f"slot '{name}': init string is {len(init)} chars but the VM's "
+                         f"buffer holds {MAX_LITERAL} — it is truncated silently to "
+                         f"{init[:MAX_LITERAL]!r}. Shorten it.")
         self.slots[name] = typ
 
     # ---------------------------------------------------------------
@@ -475,6 +510,18 @@ class Behavior:
                 # which is written by `format` / string slots — never by add/set
                 # on int/float/bool. Rendering an int slot directly draws blank.
                 src = p["src"]
+                # Silent-truncation guard: a literal longer than the VM's string
+                # buffer is dropped at compile time with no error, and a word
+                # missing its tail reads as a typo on the panel. The screen has
+                # room (font 2 averages ~6.6 px/char, so even 36 chars fit 240 px
+                # — check the layout separately); the BUFFER is the limit.
+                lit = src.get("lit") if isinstance(src, dict) else src
+                if isinstance(lit, str) and len(lit) > MAX_LITERAL:
+                    self.err(f"event '{ev_name}': render.text.src literal is {len(lit)} "
+                             f"chars, over the VM's {MAX_LITERAL}-character limit — it "
+                             f"is TRUNCATED silently to {lit[:MAX_LITERAL]!r}, which "
+                             f"reads as a misspelled word on the panel. Shorten it or "
+                             f"render it in two parts.")
                 if isinstance(src, dict) and "slot" in src:
                     slot_name = src["slot"]
                     if slot_name in self.slots and self.slots[slot_name] != "string":
