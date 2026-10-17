@@ -222,18 +222,26 @@ on the panel at all.
 
 ## What was actually shot and cut (Oct 16 2026)
 
-Brad filmed two batches, 12 clips, into `docs/media/` — all portrait 1080x1920 with a −90
+Brad filmed three batches, 18 clips, into `docs/media/` — all portrait 1080x1920 with a −90
 rotation tag (ffmpeg autorotates; `-vf crop` then works in rotated coordinates). Read
 contact sheets before trusting timestamps: the two batches caught different things, and the
 first batch alone looked like a failed erase.
 
-Hero video: `docs/media/oneboard-demo-panel.mp4` — 1920x1080, 30 fps, **63.6 s**, silent,
-built by `tools/build_demo_cut.py` (re-run it after editing `SEGS`; `--only i,j` re-renders
-single segments and the concat re-stitches). Source clips and the MP4 are both untracked;
-attach the MP4 to a release.
+Hero video: `docs/media/oneboard-demo-panel.mp4` — 1920x1080, 30 fps, **57.5 s**, 15
+segments, silent, built by `tools/build_demo_cut.py` (re-run it after editing `SEGS`;
+`--only i,j` re-renders single segments and the concat re-stitches). Source clips and the MP4
+are both untracked; attach the MP4 to a release. A third batch (6 clips, 2026-10-17,
+`…0353xx`/`…0354xx`) replaced every per-tool shot and added the live-change take; the earlier
+63.6 s cut is kept beside it as `docs/media/oneboard-demo-panel-v1.mp4`.
+
+The cut leads with the claim rather than a feature tour: the firmware is an interpreter
+flashed once, and the tools are behaviour JSON the board fetches. The old cut spent 32% of
+its runtime on a tool tour and stated the claim only in its last card, which is why the
+per-tool shots are now 3 s each and the live change is the centrepiece.
 
 | cut | shot | source clip | in-clip |
 |---|---|---|---|
+| 00 | title card ("One flash.") | — | — |
 | 01 | the blank board | `…061810003` | 3.6 s |
 | 02 | flash / esptool | `…105756348` | 13.6 s |
 | 03 | boots and runs alone | `…061810003` | 24.0 s |
@@ -241,17 +249,28 @@ attach the MP4 to a release.
 | 05 | captive portal opens | `…110015793` | 1.0 s |
 | 06 | provision | `…105913700` | 25.5 s |
 | 07 | joined + store found | `…110015793` | 12.0 s |
-| 08 | the launcher | `…105756348` | 43.5 s |
-| 09 | timer | `…110141307` | 23.5 s |
-| 10 | temp logger + graph | `…110141307` | 0.5 s |
-| 11 | tap counter (0→4) | `…110141307` | 18.6 s |
-| 12 | close, back to launcher | `…061845332` | 3.5 s |
+| 08 | the tool list | `…105756348` | 43.5 s |
+| 09 | **live change over WiFi** | `…035523677` | 6.0 s (11.0 s long) |
+| 10 | timer | `…035448981` | 3.6 s |
+| 11 | temp logger + graph | `…035434777` | 1.8 s |
+| 12 | tap counter | `…035313276` | 2.2 s |
+| 13 | reaction game | `…035416284` | 4.0 s |
+| 14 | end card + repo | — | — |
 
 Gaps, stated rather than faked:
 
-- **Shot 4 (first-boot message)** — unfilmable until the boot-order fix above lands.
-- **Shot 12 (reaction-game)** — never filmed; only `timer`, `temp-logger` and `tap-counter`
-  were played on camera. The launcher shot lists all four, which is what the video claims.
+- **Shot 4 (first-boot message)** — still unfilmable until the boot-order fix above lands.
+- **Shot 12 (reaction-game)** — no longer a gap: filmed 2026-10-17 as `…035416284`, and the
+  clip catches the result screen, the green READY wait and the red TAP! state.
+- **The live change** (`…035523677`, 18.5 s, one unbroken take): the tool's JSON on the store
+  was copied over at 10.5 s into the clip and the panel finished recompiling and redrawing at
+  12.9 s. The cut uses 6.0-17.0 s, so the change lands about 4.5 s into the segment, and the
+  count resetting to 0 is the visible proof that the tool re-read its file.
+- **The Stopwatch is left out of the cut on purpose.** `behaviors/i-need-a-stopwat.json` is
+  served by the store — its index reports 5 behaviours — and clip `…035330863` (9.4 s) is that
+  tool. It is deliberately not used, and shot 08 is yesterday's footage that honestly shows
+  four rows. Shot 08's caption therefore claims the list comes *from the store*, never a row
+  count, so it stays true as the store's contents change.
 - The `…102704981` clip (116 s, `/make` of a multiplication table) is **not** in the cut: it
   is a different story and it was filmed pre-flicker-fix.
 
