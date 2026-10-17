@@ -15,8 +15,8 @@
             {"add": {"slot": "count", "delta": {"lit": 1}}},
             {"format": {"slot": "count_txt", "op": "int", "src": {"slot": "count"}}},
             {"render": {"type": "clear", "color": "black"}},
-            {"render": {"type": "text", "x": {"lit": 120}, "y": {"lit": 50}, "src": {"lit": "Tap Counter"}, "font": {"lit": 2}, "color": "yellow", "center": true}},
-            {"render": {"type": "text", "x": {"lit": 120}, "y": {"lit": 120}, "src": {"slot": "count_txt"}, "font": {"lit": 6}, "color": "green", "center": true}},
+            {"render": {"type": "text", "x": {"lit": 120}, "y": {"lit": 40}, "src": {"lit": "Tap Counter"}, "font": {"lit": 2}, "color": "yellow", "center": true}},
+            {"render": {"type": "text", "x": {"lit": 120}, "y": {"lit": 130}, "src": {"slot": "count_txt"}, "font": {"lit": 6}, "color": "green", "center": true}},
             {"render": {"type": "text", "x": {"lit": 120}, "y": {"lit": 240}, "src": {"lit": "Tap to count"}, "font": {"lit": 2}, "color": "white", "center": true}}
           ]
         }

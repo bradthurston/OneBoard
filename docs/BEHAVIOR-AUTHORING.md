@@ -116,7 +116,14 @@ darkgray grey gray`.
 - `rect` / `fillrect` → `{"x","y","w","h","color"}`
 - `line` → `{"x","y","w","h","color"}` (x,y = p1; w,h = p2)
 - `circle` → `{"x","y","r","color"}`
-- `bar` → `{"x","y","w","h","color","src","max","px"}` (w may be `{"slot":...}`)
+- `bar` → `{"x","y","w","h","color","src","max","px"}` (w may be `{"slot":...}`).
+  A bar with `w <= 0` draws NOTHING at all (it used to stroke its outline, so a
+  `progress`-driven bar at 0 px left a 1x10 px colour line at its origin that
+  reads as a dead pixel). For a visible track to fill, draw a second bar of fixed
+  width in a dim colour.
+- `text` → put `"center": true` and set `x` to the panel centre (120 on the CYD):
+  the house style centres headings, values and hints — see the layout grid in
+  `Projects/OneBoardManyTools/Overview.md`. Without it, `x` is the left edge.
 - `graph` → `{"x","y","w","h","color","slot"}` (`slot` = float slot to graph).
   The graph erases its own plot interior (to black — keep graphs on a black
   background) before drawing the trace, so it needs no `clear` and can update on

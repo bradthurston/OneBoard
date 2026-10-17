@@ -522,6 +522,16 @@ class Behavior:
                              f"is TRUNCATED silently to {lit[:MAX_LITERAL]!r}, which "
                              f"reads as a misspelled word on the panel. Shorten it or "
                              f"render it in two parts.")
+                # House style: text is centred on the panel. Brad asked for this
+                # across every tool (2026-10-17) — headings, values and hints all
+                # sit at x = 120 (panel centre) with "center": true, matching the
+                # store examples (stopwatch, dice, two-buttons, multiplication).
+                # Left-aligned text is allowed, but should be a deliberate choice.
+                if not p.get("center"):
+                    self.warn(f"event '{ev_name}': render.text is not centred — house "
+                              f"style centres text on the panel (\"center\": true with "
+                              f"x = 120 on a 240 px screen). Ignore if left alignment is "
+                              f"deliberate.")
                 if isinstance(src, dict) and "slot" in src:
                     slot_name = src["slot"]
                     if slot_name in self.slots and self.slots[slot_name] != "string":

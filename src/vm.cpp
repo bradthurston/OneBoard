@@ -1296,7 +1296,14 @@ void vmRender(VmState* state, const VmProgram* prog, TFT_eSPI* tft) {
         break;
 
       case R_BAR:
-        if (w > 0) tft->fillRect(x, y, w, h, color);
+        // A zero-width bar draws NOTHING, deliberately. It used to stroke the
+        // outline unconditionally, so a bar whose width came from `progress` at
+        // 0 px left a 1x10 px line of the bar's colour sitting at its origin —
+        // which on the timer read as a dead pixel on the panel (reported from
+        // hardware 2026-10-17). An author who wants a visible track to fill
+        // should draw a fixed-width bar in a dim colour instead.
+        if (w <= 0) break;
+        tft->fillRect(x, y, w, h, color);
         tft->drawRect(x, y, w, h, color);
         break;
 

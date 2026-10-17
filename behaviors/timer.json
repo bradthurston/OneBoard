@@ -5,8 +5,7 @@
   "state": [
     {"name": "elapsed_ms", "type": "int64", "init": 0},
     {"name": "running",    "type": "bool",  "init": true},
-    {"name": "elapsed_txt","type": "string","init": "00:00"},
-    {"name": "progress_w", "type": "int64", "init": 0}
+    {"name": "elapsed_txt","type": "string","init": "00:00"}
   ],
   "events": [
     {
@@ -18,12 +17,10 @@
           "run": [
             {"add": {"slot": "elapsed_ms", "delta": {"lit": 1000}}},
             {"format": {"slot": "elapsed_txt", "op": "ms", "src": {"slot": "elapsed_ms"}}},
-            {"progress": {"slot": "progress_w", "src": {"slot": "elapsed_ms"}, "max": {"lit": 3600000}, "px": {"lit": 220}}},
             {"render": {"type": "clear", "color": "black"}},
-            {"render": {"type": "text", "x": {"lit": 20}, "y": {"lit": 60}, "src": {"lit": "Timer"}, "font": {"lit": 2}, "color": "yellow"}},
-            {"render": {"type": "text", "x": {"lit": 50}, "y": {"lit": 110}, "src": {"slot": "elapsed_txt"}, "font": {"lit": 6}, "color": "green"}},
-            {"render": {"type": "bar", "x": {"lit": 10}, "y": {"lit": 170}, "w": {"slot": "progress_w"}, "h": {"lit": 10}, "color": "blue"}},
-            {"render": {"type": "text", "x": {"lit": 30}, "y": {"lit": 210}, "src": {"lit": "Touch to pause/resume"}, "font": {"lit": 2}, "color": "white"}}
+            {"render": {"type": "text", "x": {"lit": 120}, "y": {"lit": 40}, "src": {"lit": "Timer"}, "font": {"lit": 2}, "color": "yellow", "center": true}},
+            {"render": {"type": "text", "x": {"lit": 120}, "y": {"lit": 130}, "src": {"slot": "elapsed_txt"}, "font": {"lit": 6}, "color": "green", "center": true}},
+            {"render": {"type": "text", "x": {"lit": 120}, "y": {"lit": 240}, "src": {"lit": "Touch to pause/resume"}, "font": {"lit": 2}, "color": "white", "center": true}}
           ]
         }
       ]

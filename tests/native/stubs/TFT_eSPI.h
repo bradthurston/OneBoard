@@ -9,6 +9,7 @@ public:
   // self-erasing text blanks its own small box instead of clearing the screen.
   static inline int fillScreen_calls = 0;
   static inline int fillRect_calls = 0;
+  static inline int drawRect_calls = 0;
   static inline int16_t last_fr_x = 0, last_fr_y = 0, last_fr_w = 0, last_fr_h = 0;
   // Text recorder: the VM copies a text literal into a fixed char[VM_STR_LEN]
   // buffer, so a test can prove a long literal arrives whole instead of being
@@ -16,7 +17,7 @@ public:
   static inline char last_text[128] = {0};
   static inline int text_calls = 0;
   static void resetCalls() {
-    fillScreen_calls = fillRect_calls = text_calls = 0;
+    fillScreen_calls = fillRect_calls = drawRect_calls = text_calls = 0;
     last_fr_x = last_fr_y = last_fr_w = last_fr_h = 0;
     last_text[0] = 0;
   }
@@ -30,7 +31,7 @@ public:
     if (s) for (; s[i] && i < sizeof(last_text) - 1; ++i) last_text[i] = s[i];
     last_text[i] = 0;
   }
-  void drawRect(int16_t, int16_t, int16_t, int16_t, uint16_t) {}
+  void drawRect(int16_t, int16_t, int16_t, int16_t, uint16_t) { ++drawRect_calls; }
   void fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t) {
     ++fillRect_calls; last_fr_x = x; last_fr_y = y; last_fr_w = w; last_fr_h = h;
   }

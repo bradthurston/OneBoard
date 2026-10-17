@@ -230,9 +230,39 @@ static void longLiteralText() {
   assert(got == overLimit.substr(0, VM_STR_LEN - 1));
 }
 
+// A zero-width bar must draw NOTHING. R_BAR used to stroke its outline
+// unconditionally, so a bar fed from `progress` at 0 px left a 1x10 px line of
+// the bar's colour sitting at its origin — on the timer's panel that was
+// reported as a dead pixel. Zero width now means zero ink; an author who wants a
+// visible track to fill draws a fixed-width bar in a dim colour instead.
+static void zeroWidthBar() {
+  TFT_eSPI tft;
+  auto drawBar = [&](int wpx) {
+    std::string json = R"({"id":"t","state":[{"name":"n","type":"int64","init":0}],)"
+      R"("events":[{"name":"tick","schedule":{"type":"interval","ms":250},"handlers":[{"run":[)"
+      R"({"render":{"type":"bar","x":{"lit":10},"y":{"lit":170},"w":{"lit":)" +
+      std::to_string(wpx) + R"(},"h":{"lit":10},"color":"blue"}}]}]}]})";
+    JsonDocument d;
+    assert(!deserializeJson(d, json));
+    VmProgram p; VmState s;
+    assert(vmCompile(d.as<JsonObject>(), &p));
+    vmStateInit(&s, &p);
+    vmMarkInitialRender(&s, &p);
+    TFT_eSPI::resetCalls();
+    vmRender(&s, &p, &tft);
+  };
+  drawBar(0);
+  assert(TFT_eSPI::fillRect_calls == 0);
+  assert(TFT_eSPI::drawRect_calls == 0);
+  drawBar(50);
+  assert(TFT_eSPI::fillRect_calls == 1);
+  assert(TFT_eSPI::drawRect_calls == 1);
+  assert(TFT_eSPI::last_fr_w == 50);
+}
+
 int main(int argc,char** argv) {
   limits(); renderLimit(); references(); progress(); mathVerbs(); initialBranches();
-  selfErasingText(); longLiteralText();
+  selfErasingText(); longLiteralText(); zeroWidthBar();
   for(int i=1;i<argc;++i) {
     std::ifstream input(argv[i]); JsonDocument doc; assert(!deserializeJson(doc,input));
     VmProgram p; if(!vmCompile(doc.as<JsonObject>(),&p)) { std::cerr<<argv[i]<<": "<<p.compile_error<<"\n"; return 1; }
