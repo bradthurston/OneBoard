@@ -191,9 +191,18 @@ in provisioning mode (no saved WiFi).
 ### Author a tool with an LLM
 ```bash
 python3 tools/author.py "I want a dice roller that rolls 1-6" --board 192.168.1.206
+python3 tools/author.py "a timer for the smoker" --name "Smoker Timer"   # name it
+python3 tools/author.py "a stopwatch" --dry-run    # resolved id/title, no LLM call
 ```
 The pipeline: LLM writes JSON against the board's vocabulary → validator →
 bounded self-correction loop → `behaviors/<id>.json` → pushed live to the board.
+
+Left alone, the id is a slug of your own words and the model chooses the
+on-screen title; `--name` pins the title (`--id` pins the id, and the id follows
+the name otherwise). Ids are lowercase/digits/dashes, **15 characters max** —
+`VmProgram.id` is `char[16]` and the firmware copies it with
+`strncpy(..., sizeof-1)`, so a 16-character id is silently truncated on the
+device even though the store serves it happily.
 
 > **Provider note:** the OpenRouter DeepSeek-V4-Flash calls must include
 > `"reasoning": {"enabled": false}` or the model burns its whole token budget
@@ -221,6 +230,33 @@ Message `@OneBoardControl_bot`:
 `/schema` — the VM vocabulary
 `/help`
 
+**Naming a tool.** Every tool carries two names: the **id** (the kebab-case key
+that `/load`, `/tools`, the store URL and the launcher row all use) and the
+**on-screen title** the behavior draws. Left alone, the id is a slug of your own
+words and the model picks the title:
+
+```
+/make I need a stopwatch          → id: stopwatch,  title: Stopwatch
+```
+
+Pin either one, and put the flag last — an unquoted `--name` takes the rest of
+the message, so it must come after the description:
+
+```
+/make a countdown timer --name "Smoker Timer"   # title (the id follows it)
+/make a countdown timer --id smoker-timer       # pin the id as well
+/make --name "Smoker Timer"                     # name only; still authors a tool
+```
+
+Ids are lowercase letters, digits and dashes, **15 characters maximum** — the
+board copies the id into a 16-byte field, so a longer id is served fine by the
+store but silently truncated on the device. The validator rejects one. To see
+the id and title a request will produce without spending a call:
+
+```bash
+python3 tools/author.py "a stopwatch" --dry-run
+```
+
 Runs as the systemd user service `oneboard-tg-bot` (see `systemd/`).
 Token lives in `~/.hermes/keys/oneboard-telegram.env` (0600) — never in the repo.
 `/make` reuses the bot's own `ONBOARD_BOARD_IP` / store URL and runs author.py
@@ -246,7 +282,7 @@ those four are protected from store deletion. Tools created by `/make` (or added
 to `behaviors/`) are store-only and can be deleted freely.
 
 `examples/store-only/` keeps four more worked examples — `dice`, `stopwatch`,
-`multiplication-f`, `two-buttons` — deliberately outside `behaviors/` so a fresh
+`multiplication`, `two-buttons` — deliberately outside `behaviors/` so a fresh
 store lists only what the firmware comes with. Copy one in to serve it.
 
 ---

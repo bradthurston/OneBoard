@@ -62,10 +62,10 @@ STEPS = [
      "the launcher: 'OneBoard - pick a tool' + the tool list", 3, False, None),
 
     ("Pick the maths tool from the board itself",
-     "tap the 'multiplication-f' row", 0, True, "multiplication-f"),
+     "tap the 'multiplication' row", 0, True, "multiplication"),
 
     ("It picked two random numbers and multiplied them ON the board",
-     "Multiplication  a x b = answer   (the mul verb did the maths)", 3, False, "multiplication-f"),
+     "Multiplication  a x b = answer   (the mul verb did the maths)", 3, False, "multiplication"),
 
     ("Tap anywhere for the next problem",
      "a different multiplication problem, computed on the board", 0, True, None),
@@ -74,7 +74,7 @@ STEPS = [
      "another new problem", 0, True, None),
 
     ("Back to home with the top-left arrow",
-     "the launcher again, multiplication-f highlighted", 0, True, None),
+     "the launcher again, multiplication highlighted", 0, True, None),
 
     ("Pick a completely different tool - no reflash, same board",
      "tap the 'timer' row", 0, True, "timer"),

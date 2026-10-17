@@ -36,7 +36,7 @@ timer
 
 Those are compiled into the firmware (`progmemBehavior()` / `seedDefaultBehaviors()` in
 `src/main.cpp`), and they are also exactly what the store serves. The extras that used to
-be store-only — `multiplication-f`, `dice`, `stopwatch`, `two-buttons` — now live in
+be store-only — `multiplication`, `dice`, `stopwatch`, `two-buttons` — now live in
 `examples/store-only/`, which `serve.py` does not serve, so they cannot reach the launcher
 at all.
 

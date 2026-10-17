@@ -101,6 +101,17 @@ class Behavior:
         for req in ("id", "name", "state", "events"):
             if req not in d:
                 self.err(f"missing required top-level key: '{req}'")
+        # id: the board copies it into a 16-byte VmProgram.id with
+        # strncpy(prog->id, id, sizeof-1) — 15 chars max, or the device silently
+        # truncates it while the store's file name keeps the full id.
+        tid = d.get("id")
+        if isinstance(tid, str) and tid:
+            if len(tid) > 15:
+                self.err(f"id '{tid}' is {len(tid)} chars — max 15 "
+                         f"(VmProgram.id is char[16], the copy keeps 15)")
+            if not all(c in "abcdefghijklmnopqrstuvwxyz0123456789-" for c in tid) \
+                    or tid.startswith("-"):
+                self.err(f"id '{tid}' must be kebab-case (a-z, 0-9, dashes)")
         # state
         if isinstance(d.get("state"), list):
             for s in d["state"]:

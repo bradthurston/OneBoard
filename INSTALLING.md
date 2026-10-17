@@ -201,11 +201,16 @@ The pipeline: LLM writes JSON against the board's vocabulary → validated →
 self-corrected on errors → saved to `behaviors/` → pushed live to the board
 via `/store` + `/load`. No reflash.
 
-> The store ships exactly the four tools the firmware comes with, so a fresh
+> The store ships the four tools the firmware comes with, so a fresh
 > store is never cluttered: timer, temp-logger, reaction-game, tap-counter.
 > Four more worked examples live in `examples/store-only/` (dice, stopwatch,
-> multiplication-f, two-buttons) — validated by CI, but not served, because a
+> multiplication, two-buttons) — validated by CI, but not served, because a
 > store should not advertise tools a from-scratch board doesn't have.
+>
+> Anything you author (`/make`, or `tools/author.py`) lands in `behaviors/` and
+> is served immediately — the store does not cache. Name it yourself with
+> `--name "Smoker Timer"` (and `--id smoker-timer`); ids are 15 characters max,
+> because the board copies the id into a 16-byte field.
 
 ---
 
@@ -252,7 +257,9 @@ via `/store` + `/load`. No reflash.
    systemctl --user daemon-reload
    systemctl --user enable --now oneboard-tg-bot
    ```
-5. In Telegram, message your bot: `/status`, `/tools`, `/load timer`, `/schema`, `/help`.
+5. In Telegram, message your bot: `/status`, `/tools`, `/load timer`, `/schema`,
+   `/help`. `/make a countdown timer --name "Smoker Timer"` authors a new tool
+   and names it (see the README's *Control from Telegram* for the naming rules).
 
 > The env file (`oneboard-telegram.env`) must contain `ONBOARD_BOT_TOKEN`,
 > `ONBOARD_BOARD_IP`, `ONBOARD_STORE_URL`, and `ONBOARD_ALLOWED` (your Telegram

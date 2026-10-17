@@ -110,6 +110,10 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/tools — list available behaviors\n"
         "/load <id> — load a behavior onto the board\n"
         "/make <request> — author a NEW behavior and push it to the board (LLM)\n"
+        "    name it yourself:   /make a countdown timer --name \"Smoker Timer\"\n"
+        "    or pin the id:      /make a countdown timer --id smoker-timer\n"
+        "    (neither? the id is a slug of your own words — \"i need a stopwatch\"\n"
+        "     -> stopwatch — and the model picks the on-screen title)\n"
         "/delete <id> — remove a tool from the store\n"
         "/schema — VM vocabulary (self-description)\n"
         "/help — this"
@@ -174,28 +178,80 @@ async def cmd_schema(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 
+def parse_make_args(args):
+    """Split `/make` arguments into (request, tool_id, name).
+
+    `--id <x>` and `--name <y>` may appear anywhere in the message; both are
+    pulled out so the rest stays a plain description. A quoted value keeps its
+    spaces: `/make a countdown --name "Smoker Timer"`. A bare, unquoted value
+    runs to the end of the message or to the next `--flag`.
+    """
+    request, tool_id, name = [], None, None
+    i = 0
+    while i < len(args):
+        tok = args[i]
+        if tok == "--id" and i + 1 < len(args):
+            # an id is one kebab-case token — never a phrase
+            tool_id = args[i + 1].strip().strip('"').strip("'").strip() or None
+            i += 2
+            continue
+        if tok == "--name" and i + 1 < len(args):
+            i += 1
+            val = []
+            while i < len(args):
+                t = args[i]
+                val.append(t)
+                closed = t.endswith(('"', "'")) and len(t.strip('"\' ')) > 0
+                i += 1
+                if closed or (i < len(args) and args[i].startswith("--")):
+                    break
+            joined = " ".join(val).strip().strip('"').strip("'").strip()
+            if joined:
+                name = joined
+            continue
+        request.append(tok)
+        i += 1
+    return " ".join(request).strip(), tool_id, name
+
+
 async def cmd_make(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not authorized(update):
         return
     if not ctx.args:
         await update.message.reply_text(
-            "Usage: /make <request>   e.g. /make a countdown timer\n"
+            "Usage: /make <request> [--name \"Human Name\"] [--id some-id]\n"
+            "  /make a countdown timer --name \"Smoker Timer\"\n"
             "I turn it into a OneBoard behavior and push it to the board "
-            "(this takes ~30-90s — I'll reply when it's done)."
+            "(this takes ~30-90s — I'll reply when it's done).\n"
+            "Without --name/--id the id comes from your own words (\"i need a "
+            "stopwatch\" -> stopwatch) and the model names it on screen."
         )
         return
-    request = " ".join(ctx.args).strip()
-    if not request:
+    request, tool_id, name = parse_make_args(ctx.args)
+    if not request and not (tool_id or name):
         await update.message.reply_text("Empty request.")
         return
+    if not request:
+        # e.g. "/make --name Smoker Timer" — let author.py derive the behavior
+        request = "%s (a %s tool)" % (name or tool_id, name or tool_id)
 
+    named = []
+    if tool_id:
+        named.append("id " + tool_id)
+    if name:
+        named.append('name "%s"' % name)
     confirm = await update.message.reply_text(
-        f"Authoring: \"{request}\"\n"
-        f"Writing the behavior, validating, and pushing to the board…"
+        f"Authoring: \"{request}\""
+        + (("\nas " + ", ".join(named)) if named else "")
+        + "\nWriting the behavior, validating, and pushing to the board…"
     )
 
     cmd = [VENV_PY, os.path.join(REPO, "tools", "author.py"),
            request, "--board", BOARD, "--store-port", _store_port()]
+    if tool_id:
+        cmd += ["--id", tool_id]
+    if name:
+        cmd += ["--name", name]
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
@@ -215,7 +271,7 @@ async def cmd_make(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     summary = []
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped.startswith(("Wrote:", "VALID", "FAILED", "{", "Store:", "Board:")):
+        if stripped.startswith(("Wrote:", "Tool:", "VALID", "FAILED", "{", "Store:", "Board:")):
             summary.append(stripped)
     tail = "\n".join(summary) if summary else text[-1500:]
     if proc.returncode == 0:

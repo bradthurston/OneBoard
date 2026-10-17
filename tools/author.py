@@ -8,7 +8,9 @@ compiles the JSON at load; "one board becomes many tools" is literally this.
 
 Usage:
     python3 tools/author.py "a countdown timer showing MM:SS"
-    python3 tools/author.py "a stopwatch" --id stopwatch --no-load
+    python3 tools/author.py "a stopwatch" --no-load          # id: stopwatch
+    python3 tools/author.py "a timer for the smoker" --name "Smoker Timer"
+    python3 tools/author.py "a stopwatch" --dry-run          # show the resolved name, no LLM call
     python3 tools/author.py --file request.txt --board 192.168.1.206
 
 Flow:
@@ -254,11 +256,50 @@ def get_lan_ip():
     raise SystemExit("cannot determine LAN IP — pass --board-store manually?")
 
 
+# Filler words dropped when deriving a tool id from a spoken request, so
+# "I need a stopwatch" becomes `stopwatch` rather than `i-need-a-stopwat`.
+SLUG_STOPWORDS = {
+    "a", "an", "the", "i", "me", "my", "we", "you", "please", "can", "could",
+    "would", "like", "want", "need", "make", "build", "create", "give", "some",
+    "for", "to", "of", "with", "that", "this", "it", "just", "help", "tool",
+    "one", "board", "onboard", "and",
+}
+
+
+def slugify(request, maxlen=15, maxwords=4):
+    """Kebab-case tool id from a spoken request, cut on word boundaries.
+
+    maxlen defaults to 15 because the board copies the id into a 16-byte
+    `VmProgram.id` with `strncpy(..., sizeof-1)`: 16 chars would be silently
+    truncated on the device.
+    """
+    words = re.sub(r"[^a-z0-9]+", " ", request.lower()).split()
+    keep = [w for w in words if w not in SLUG_STOPWORDS] or words
+    out = []
+    for w in keep[:maxwords]:
+        cand = "-".join(out + [w])
+        if len(cand) > maxlen:
+            break
+        out.append(w)
+    if not out:
+        out = [keep[0][:maxlen]]
+    return "-".join(out) or "tool"
+
+
+def default_name(tool_id):
+    """A readable title from a derived id: `cook-timer` -> `Cook Timer`."""
+    return " ".join(w.capitalize() for w in tool_id.split("-"))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("request", nargs="?", help='natural-language request, e.g. "a countdown timer"')
     ap.add_argument("--file", help="read request from file")
     ap.add_argument("--id", help="tool id (kebab-case); default: slug of request")
+    ap.add_argument("--name", help="human-readable name shown on the board and in the "
+                                  "launcher; default: slug of request, run through the model")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="print the resolved id/name/prompt and exit (no LLM call, no writes)")
     ap.add_argument("--board", default=None, help="board IP, e.g. 192.168.1.206")
     ap.add_argument("--store-port", type=int, default=8080,
                     help="port of this machine's serve.py (default 8080)")
@@ -278,18 +319,33 @@ def main():
     if not request:
         ap.error("empty request")
 
-    tool_id = args.id
-    if not tool_id:
-        slug = re.sub(r"[^a-z0-9]+", "-", request.lower()).strip("-")
-        tool_id = slug[:16] or "tool"
+    # --name wins for the display name; the id is a slug of it unless --id is given,
+    # so naming a tool once names it everywhere (launcher row, /tools, /load).
+    tool_name = args.name
+    tool_id = args.id or slugify(tool_name or request)
+    if not tool_name:
+        tool_name = default_name(tool_id)
 
-    key = read_key()
+    key = None
     user_prompt = (
         "Write a OneBoard behavior definition for this request:\n\n"
         + request + "\n\n"
         "Tool id must be exactly: " + tool_id + "\n"
+        "The tool's on-screen title must read exactly: " + tool_name + "\n"
         "Respond with ONLY the JSON behavior definition."
     )
+
+    if args.dry_run:
+        print("Request: %s" % request)
+        print("id:      %s%s" % (tool_id, "  (--id)" if args.id else "  (slug of the request)"))
+        print("name:    %s%s" % (tool_name,
+                                 "  (--name)" if args.name
+                                 else "  (title of the id; the model may refine it)"))
+        print("\nPrompt that would be sent:\n")
+        print(user_prompt)
+        return 0
+
+    key = read_key()
 
     doc = None
     errors = []
@@ -341,10 +397,16 @@ def main():
         return 1
 
     # id consistency: force the file/register id to the JSON's id if present
+    assert doc is not None  # a validation error would have returned above
     if "id" in doc and doc["id"]:
         tool_id = doc["id"]
+    # an explicit --name is authoritative; otherwise keep the model's own name
+    if args.name:
+        doc["name"] = args.name
+    tool_name = doc.get("name") or tool_name
     path = write_behavior(doc, tool_id)
     print("Wrote:  %s" % path)
+    print("Tool:   %s  (%s)  — load it with: /load %s" % (tool_id, tool_name, tool_id))
 
     if not args.no_load:
         if not args.board:
